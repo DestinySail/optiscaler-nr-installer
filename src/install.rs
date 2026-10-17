@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::archive::copy_file;
 use crate::assets::PreparedComponents;
 use crate::ini;
 use crate::model::{AppPaths, GameInfo, InstallRecord, MaintenanceReport, ManagedFile, Progress};
@@ -23,6 +22,7 @@ struct PlannedFile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TransactionEntry {
     target: PathBuf,
+    #[serde(default)]
     backup: Option<PathBuf>,
 }
 
@@ -30,6 +30,7 @@ struct TransactionEntry {
 struct Transaction {
     schema: u32,
     game_dir: PathBuf,
+    #[serde(default)]
     backup_root: PathBuf,
     entries: Vec<TransactionEntry>,
     started_at_ms: u64,
@@ -70,44 +71,44 @@ pub fn install(
         return Err("文件计划存在大小写冲突".to_string());
     }
 
-    let stamp = now_ms().to_string();
-    let backup_root = paths.backups.join(&id).join(&stamp);
-    fs::create_dir_all(&backup_root).map_err(|e| format!("创建备份目录失败: {e}"))?;
     progress(Progress::new(
-        "备份",
-        "备份游戏目录中的现有文件",
+        "清理",
+        "检查现有文件，不保留游戏文件备份",
         Some(0.08),
     ));
     let mut entries = Vec::new();
-    let mut backed_up = HashSet::new();
+    let mut seen = HashSet::new();
     for file in &plan {
         let target = game.game_dir.join(&file.relative);
-        add_transaction_entry(
-            &game.game_dir,
-            &backup_root,
-            &target,
-            &mut entries,
-            &mut backed_up,
-        )?;
+        add_transaction_entry(&game.game_dir, &target, &mut entries, &mut seen)?;
     }
-    add_transaction_entry(
-        &game.game_dir,
-        &backup_root,
-        &ini_path,
-        &mut entries,
-        &mut backed_up,
-    )?;
+    add_transaction_entry(&game.game_dir, &ini_path, &mut entries, &mut seen)?;
+    if let Some(previous) = existing_record.as_ref() {
+        for file in &previous.files {
+            let target = record_target(&game.game_dir, &file.relative_path)?;
+            add_transaction_entry(&game.game_dir, &target, &mut entries, &mut seen)?;
+        }
+    }
     let transaction_path = state_dir.join("transaction.json");
     let transaction = Transaction {
-        schema: 1,
+        schema: 2,
         game_dir: game.game_dir.clone(),
-        backup_root: backup_root.clone(),
+        backup_root: PathBuf::new(),
         entries: entries.clone(),
         started_at_ms: now_ms(),
     };
     write_json_atomic(&transaction_path, &transaction)?;
 
     let result = (|| {
+        progress(Progress::new(
+            "清理",
+            "移除已有的注入文件和旧版本残留",
+            Some(0.10),
+        ));
+        if let Some(previous) = existing_record.as_ref() {
+            remove_record_files(&game.game_dir, previous, true)?;
+        }
+        remove_injection_dirs(&game.game_dir)?;
         if !ini_path.is_file() {
             progress(Progress::new("应用", "创建 OptiScaler.ini", None));
             copy_replacing(&template_ini, &ini_path)?;
@@ -162,7 +163,6 @@ pub fn install(
         });
 
         if let Some(previous) = existing_record.as_ref() {
-            copy_file(&record_path, &previous_record_path)?;
             progress(Progress::new(
                 "提交",
                 format!("从 {} 升级", previous.upstream_tag),
@@ -170,7 +170,7 @@ pub fn install(
             ));
         }
         let record = InstallRecord {
-            schema: 1,
+            schema: 2,
             game_name: game.name.clone(),
             exe: game.exe.clone(),
             installed_at_ms: now_ms(),
@@ -179,13 +179,9 @@ pub fn install(
             profile: crate::model::FIXED_PROFILE.to_string(),
             proxy_file: proxy.clone(),
             files: managed,
-            baseline_backup: existing_record
-                .as_ref()
-                .map(|record| record.baseline_backup.clone())
-                .unwrap_or_else(|| backup_root.clone()),
-            previous_snapshot: backup_root.clone(),
         };
         write_json_atomic(&record_path, &record)?;
+        let _ = fs::remove_file(&previous_record_path);
         fs::remove_file(&transaction_path).map_err(|e| format!("提交事务记录失败: {e}"))?;
         Ok(MaintenanceReport {
             title: "安装完成".to_string(),
@@ -195,6 +191,7 @@ pub fn install(
                 format!("代理：{proxy}"),
                 format!("固定资源：{}", components.extras_version),
                 format!("受管文件：{} 个", record.files.len()),
+                "不保留游戏文件备份；卸载会删除本项目注入的文件".to_string(),
             ],
         })
     })();
@@ -203,10 +200,15 @@ pub fn install(
         return match rollback_transaction(&transaction) {
             Ok(()) => {
                 let _ = fs::remove_file(&transaction_path);
-                result
+                let _ = fs::remove_file(&record_path);
+                let _ = fs::remove_file(&previous_record_path);
+                prune_injection_dirs(&game.game_dir);
+                Err(format!(
+                    "{error}\n已移除本次注入的文件，游戏恢复到无本项目状态。"
+                ))
             }
             Err(rollback_error) => Err(format!(
-                "{error}\n自动回滚未完成：{rollback_error}\n事务日志已保留，下次启动会继续恢复。"
+                "{error}\n自动清理未完成：{rollback_error}\n事务日志已保留，下次启动会继续清理。"
             )),
         };
     }
@@ -263,46 +265,17 @@ pub fn uninstall(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport,
         return Err("游戏正在运行，请完全退出后再卸载".to_string());
     }
     let record = load_record(paths, game)?;
-    let mut lines = Vec::new();
-    let mut restored = 0usize;
-    let mut removed = 0usize;
-    let mut kept = 0usize;
-    for file in &record.files {
-        let target = record_target(&game.game_dir, &file.relative_path)?;
-        if !target.exists() {
-            continue;
-        }
-        let actual = sha256_file(&target)?;
-        if !actual.eq_ignore_ascii_case(&file.sha256) {
-            kept += 1;
-            if lines.len() < 20 {
-                lines.push(format!("保留用户改动：{}", file.relative_path));
-            }
-            continue;
-        }
-        let baseline = record.baseline_backup.join(&file.relative_path);
-        if baseline.is_file() {
-            copy_replacing(&baseline, &target)?;
-            restored += 1;
-        } else {
-            fs::remove_file(&target).map_err(|e| format!("删除 {} 失败: {e}", target.display()))?;
-            removed += 1;
-        }
-    }
+    let removed = remove_record_files(&game.game_dir, &record, false)?;
     let state_dir = paths.games.join(game_id(&game.exe));
     let _ = fs::remove_file(state_dir.join("record.json"));
     let _ = fs::remove_file(state_dir.join("previous-record.json"));
-    lines.insert(0, format!("删除 {removed} 个、恢复 {restored} 个受管文件"));
-    if kept > 0 {
-        lines.insert(1, format!("{kept} 个文件被用户修改，已保留"));
-    }
+    prune_injection_dirs(&game.game_dir);
     Ok(MaintenanceReport {
-        title: if kept == 0 {
-            "卸载完成".to_string()
-        } else {
-            "卸载完成，部分文件已保留".to_string()
-        },
-        lines,
+        title: "卸载完成".to_string(),
+        lines: vec![
+            format!("删除 {removed} 个注入文件"),
+            "游戏已恢复到无本项目注入的状态，未保留旧版本备份".to_string(),
+        ],
     })
 }
 
@@ -349,103 +322,81 @@ pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<Maintenanc
     })
 }
 
-pub fn rollback(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport, String> {
-    if process_is_running(&game.exe)? {
-        return Err("游戏正在运行，请完全退出后再回滚".to_string());
-    }
-    let state_dir = paths.games.join(game_id(&game.exe));
-    let current = load_record(paths, game)?;
-    let previous = read_json::<InstallRecord>(&state_dir.join("previous-record.json"))
-        .map_err(|_| "没有上一版安装记录，无法回滚".to_string())?;
-    if !current.previous_snapshot.is_dir() {
-        return Err("上一版恢复快照不存在".to_string());
-    }
-    let previous_files = previous
-        .files
-        .iter()
-        .map(|file| file.relative_path.to_ascii_lowercase())
-        .collect::<HashSet<_>>();
-    for file in &current.files {
-        if previous_files.contains(&file.relative_path.to_ascii_lowercase()) {
-            continue;
-        }
-        let target = record_target(&game.game_dir, &file.relative_path)?;
-        if target.is_file() {
-            fs::remove_file(&target)
-                .map_err(|e| format!("删除新版文件 {} 失败: {e}", target.display()))?;
-        }
-    }
-    let mut stack = vec![current.previous_snapshot.clone()];
-    while let Some(dir) = stack.pop() {
-        for entry in fs::read_dir(&dir)
-            .map_err(|e| format!("读取恢复快照失败: {e}"))?
-            .flatten()
-        {
-            let source = entry.path();
-            if entry
-                .file_type()
-                .map_err(|e| format!("读取快照文件类型失败: {e}"))?
-                .is_dir()
-            {
-                stack.push(source);
-            } else {
-                let relative = source
-                    .strip_prefix(&current.previous_snapshot)
-                    .map_err(|_| "恢复快照路径越界".to_string())?;
-                copy_replacing(
-                    &source,
-                    &record_target(&game.game_dir, &relative.to_string_lossy())?,
-                )?;
-            }
-        }
-    }
-    write_json_atomic(&state_dir.join("record.json"), &previous)?;
-    let _ = fs::remove_file(state_dir.join("previous-record.json"));
-    Ok(MaintenanceReport {
-        title: "回滚完成".to_string(),
-        lines: vec![
-            format!("恢复到组件版本：{}", previous.upstream_tag),
-            format!("恢复快照：{}", current.previous_snapshot.display()),
-        ],
-    })
-}
-
 pub fn recover_transactions(paths: &AppPaths) -> Vec<String> {
     let mut messages = Vec::new();
-    let Ok(entries) = fs::read_dir(&paths.games) else {
-        return messages;
-    };
-    for entry in entries.flatten() {
-        let state_dir = entry.path();
-        let path = state_dir.join("transaction.json");
-        let Ok(transaction) = read_json::<Transaction>(&path) else {
-            continue;
-        };
-        if read_json::<InstallRecord>(&state_dir.join("record.json"))
-            .is_ok_and(|record| record.installed_at_ms >= transaction.started_at_ms)
-        {
-            let _ = fs::remove_file(&path);
-            messages.push(format!(
-                "上次事务已完成提交，清理日志：{}",
-                transaction.game_dir.display()
-            ));
-            continue;
-        }
-        match rollback_transaction(&transaction) {
-            Ok(()) => {
+    if let Ok(entries) = fs::read_dir(&paths.games) {
+        for entry in entries.flatten() {
+            let state_dir = entry.path();
+            let path = state_dir.join("transaction.json");
+            let Ok(transaction) = read_json::<Transaction>(&path) else {
+                continue;
+            };
+            if read_json::<InstallRecord>(&state_dir.join("record.json"))
+                .is_ok_and(|record| record.installed_at_ms >= transaction.started_at_ms)
+            {
                 let _ = fs::remove_file(&path);
                 messages.push(format!(
-                    "已恢复上次未完成事务：{}",
+                    "上次事务已完成提交，清理日志：{}",
                     transaction.game_dir.display()
                 ));
+                continue;
             }
-            Err(error) => messages.push(format!(
-                "未完成事务恢复失败 {}: {error}",
-                transaction.game_dir.display()
-            )),
+            match rollback_transaction(&transaction) {
+                Ok(()) => {
+                    let _ = fs::remove_file(&path);
+                    messages.push(format!(
+                        "已清理上次未完成事务：{}",
+                        transaction.game_dir.display()
+                    ));
+                }
+                Err(error) => messages.push(format!(
+                    "未完成事务恢复失败 {}: {error}",
+                    transaction.game_dir.display()
+                )),
+            }
         }
     }
+    if let Some(message) = discard_legacy_backups(paths) {
+        messages.push(message);
+    }
     messages
+}
+
+fn discard_legacy_backups(paths: &AppPaths) -> Option<String> {
+    if !paths.legacy_backups.exists() {
+        return None;
+    }
+    let pending_transaction = fs::read_dir(&paths.games).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.path().join("transaction.json").is_file())
+    });
+    if pending_transaction {
+        return Some("存在未完成事务，旧版本备份暂未删除".to_string());
+    }
+    let files = count_files(&paths.legacy_backups);
+    match remove_tree_safely(&paths.legacy_backups) {
+        Ok(()) => Some(format!("已删除旧版本本地备份：{files} 个文件")),
+        Err(error) => Some(format!("删除旧版本本地备份失败: {error}")),
+    }
+}
+
+fn count_files(root: &Path) -> usize {
+    let mut count = 0;
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                stack.push(entry.path());
+            } else {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 fn load_record(paths: &AppPaths, game: &GameInfo) -> Result<InstallRecord, String> {
@@ -581,10 +532,9 @@ fn choose_proxy(game_dir: &Path, record: Option<&InstallRecord>) -> Result<Strin
 
 fn add_transaction_entry(
     game_dir: &Path,
-    backup_root: &Path,
     target: &Path,
     entries: &mut Vec<TransactionEntry>,
-    backed_up: &mut HashSet<String>,
+    seen: &mut HashSet<String>,
 ) -> Result<(), String> {
     ensure_no_reparse_between(game_dir, target)?;
     if target.exists() && !target.is_file() {
@@ -594,21 +544,114 @@ fn add_transaction_entry(
         .strip_prefix(game_dir)
         .map_err(|_| format!("目标不在游戏目录内: {}", target.display()))?;
     let key = relative.to_string_lossy().to_ascii_lowercase();
-    if !backed_up.insert(key) {
+    if !seen.insert(key) {
         return Ok(());
     }
-    let backup = if target.is_file() {
-        let destination = backup_root.join(relative);
-        copy_file(target, &destination)?;
-        Some(destination)
-    } else {
-        None
-    };
     entries.push(TransactionEntry {
         target: target.to_path_buf(),
-        backup,
+        backup: None,
     });
     Ok(())
+}
+
+fn remove_record_files(
+    game_dir: &Path,
+    record: &InstallRecord,
+    keep_ini: bool,
+) -> Result<usize, String> {
+    let mut removed = 0;
+    for file in &record.files {
+        if keep_ini && file.relative_path.eq_ignore_ascii_case("OptiScaler.ini") {
+            continue;
+        }
+        let target = record_target(game_dir, &file.relative_path)?;
+        ensure_no_reparse_between(game_dir, &target)?;
+        if target.is_file() {
+            fs::remove_file(&target).map_err(|e| format!("删除 {} 失败: {e}", target.display()))?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn prune_injection_dirs(game_dir: &Path) {
+    for relative in ["OptiScaler", "dlssnr-amd", "person-model"] {
+        remove_empty_dirs(game_dir.join(relative));
+    }
+}
+
+fn remove_injection_dirs(game_dir: &Path) -> Result<(), String> {
+    for relative in ["OptiScaler", "dlssnr-amd", "person-model"] {
+        let path = game_dir.join(relative);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("检查 {} 失败: {error}", path.display())),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(format!("拒绝清理重解析点: {}", path.display()));
+        }
+        if metadata.is_dir() {
+            remove_tree_safely(&path)?;
+        } else {
+            fs::remove_file(&path).map_err(|e| format!("清理 {} 失败: {e}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_empty_dirs(path: PathBuf) {
+    if fs::symlink_metadata(&path).is_ok_and(|meta| is_reparse(&meta)) {
+        return;
+    }
+    let Ok(entries) = fs::read_dir(&path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            remove_empty_dirs(entry.path());
+        }
+    }
+    let _ = fs::remove_dir(&path);
+}
+
+fn remove_tree_safely(path: &Path) -> Result<(), String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| format!("检查 {} 失败: {e}", path.display()))?;
+    if is_reparse(&metadata) {
+        return if metadata.is_dir() {
+            fs::remove_dir(path)
+        } else {
+            fs::remove_file(path)
+        }
+        .map_err(|e| format!("删除重解析点 {} 失败: {e}", path.display()));
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?
+        {
+            remove_tree_safely(
+                &entry
+                    .map_err(|e| format!("读取 {} 失败: {e}", path.display()))?
+                    .path(),
+            )?;
+        }
+        fs::remove_dir(path).map_err(|e| format!("删除 {} 失败: {e}", path.display()))
+    } else {
+        fs::remove_file(path).map_err(|e| format!("删除 {} 失败: {e}", path.display()))
+    }
+}
+
+fn is_reparse(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        false
+    }
 }
 
 fn rollback_transaction(transaction: &Transaction) -> Result<(), String> {
@@ -641,6 +684,7 @@ fn rollback_transaction(transaction: &Transaction) -> Result<(), String> {
             errors.push(error);
         }
     }
+    prune_injection_dirs(&transaction.game_dir);
     if errors.is_empty() {
         Ok(())
     } else {
@@ -689,4 +733,95 @@ fn ensure_no_reparse_between(base: &Path, target: &Path) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_dir(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("optinr-{}-{name}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn record(files: &[&str]) -> InstallRecord {
+        InstallRecord {
+            schema: 2,
+            game_name: "Test".to_string(),
+            exe: PathBuf::from("Test.exe"),
+            installed_at_ms: 0,
+            upstream_tag: "1".to_string(),
+            extras_version: None,
+            profile: "test".to_string(),
+            proxy_file: "dxgi.dll".to_string(),
+            files: files
+                .iter()
+                .map(|path| ManagedFile {
+                    relative_path: (*path).to_string(),
+                    sha256: String::new(),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn uninstall_removes_managed_files_and_keeps_game_files() {
+        let game = test_dir("uninstall");
+        fs::write(game.join("OptiScaler.dll"), "injected").unwrap();
+        fs::write(game.join("OptiScaler.ini"), "config").unwrap();
+        fs::write(game.join("Game.exe"), "game").unwrap();
+        let install = record(&["OptiScaler.dll", "OptiScaler.ini"]);
+
+        assert_eq!(remove_record_files(&game, &install, false).unwrap(), 2);
+        assert!(!game.join("OptiScaler.dll").exists());
+        assert!(game.join("Game.exe").is_file());
+        fs::remove_dir_all(game).unwrap();
+    }
+
+    #[test]
+    fn failed_transaction_removes_new_injection() {
+        let game = test_dir("transaction");
+        let target = game.join("OptiScaler.dll");
+        fs::write(&target, "injected").unwrap();
+        let transaction = Transaction {
+            schema: 2,
+            game_dir: game.clone(),
+            backup_root: PathBuf::new(),
+            entries: vec![TransactionEntry {
+                target: target.clone(),
+                backup: None,
+            }],
+            started_at_ms: 1,
+        };
+
+        rollback_transaction(&transaction).unwrap();
+        assert!(!target.exists());
+        fs::remove_dir_all(game).unwrap();
+    }
+
+    #[test]
+    fn removes_legacy_backup_tree() {
+        let root = test_dir("legacy");
+        let games = root.join("games");
+        let backups = root.join("backups");
+        fs::create_dir_all(&games).unwrap();
+        fs::create_dir_all(backups.join("game").join("snapshot")).unwrap();
+        fs::write(backups.join("game").join("snapshot").join("file"), "old").unwrap();
+        let paths = AppPaths {
+            cache: root.join("cache"),
+            staging: root.join("staging"),
+            legacy_backups: backups.clone(),
+            games,
+            updates: root.join("updates"),
+            settings: root.join("settings.json"),
+            upstream_check: root.join("catalog").join("upstream.json"),
+            root: root.clone(),
+        };
+
+        assert!(discard_legacy_backups(&paths).is_some());
+        assert!(!backups.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

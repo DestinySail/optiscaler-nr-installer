@@ -65,7 +65,7 @@ fn run() -> Result<(), String> {
         ("--repair", model::Action::Repair),
         ("--uninstall", model::Action::Uninstall),
         ("--disable-fg", model::Action::DisableFrameGen),
-        ("--rollback", model::Action::Rollback),
+        ("--rollback", model::Action::Uninstall),
     ] {
         if let Some(index) = args.iter().position(|arg| arg == flag) {
             let exe = args
@@ -181,7 +181,6 @@ fn headless_maintenance(
         model::Action::Check => install::check_install(&paths, &game)?,
         model::Action::Uninstall => install::uninstall(&paths, &game)?,
         model::Action::DisableFrameGen => install::disable_frame_gen(&paths, &game)?,
-        model::Action::Rollback => install::rollback(&paths, &game)?,
         model::Action::Repair | model::Action::Update => {
             let mut settings =
                 util::read_json::<model::Settings>(&paths.settings).unwrap_or_default();

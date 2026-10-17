@@ -34,7 +34,7 @@ cargo build --release --locked
 | `src/games.rs` | Steam、Epic、Windows 卸载记录和手动游戏发现 |
 | `src/updates.rs` | TheAutomatic Release 查询与下载 |
 | `src/assets.rs` | 主包/固定资源缓存、解压与兼容性检查 |
-| `src/install.rs` | 文件计划、备份、事务、回滚、维护操作 |
+| `src/install.rs` | 文件计划、旧注入清理、事务、维护操作 |
 | `src/ini.rs` | 固定方案配置合并与只读检查 |
 | `src/self_update.rs` | 安装器签名更新清单 |
 | `src/ui.rs` | 三步界面和维护入口 |

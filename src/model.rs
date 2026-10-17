@@ -17,7 +17,7 @@ pub struct AppPaths {
     pub root: PathBuf,
     pub cache: PathBuf,
     pub staging: PathBuf,
-    pub backups: PathBuf,
+    pub legacy_backups: PathBuf,
     pub games: PathBuf,
     pub updates: PathBuf,
     pub settings: PathBuf,
@@ -33,7 +33,7 @@ impl AppPaths {
         let paths = Self {
             cache: root.join("cache"),
             staging: root.join("staging"),
-            backups: root.join("backups"),
+            legacy_backups: root.join("backups"),
             games: root.join("games"),
             updates: root.join("updates"),
             settings: root.join("settings.json"),
@@ -43,7 +43,6 @@ impl AppPaths {
         for dir in [
             &paths.cache,
             &paths.staging,
-            &paths.backups,
             &paths.games,
             &paths.updates,
             paths.upstream_check.parent().expect("catalog has a parent"),
@@ -196,8 +195,6 @@ pub struct InstallRecord {
     pub profile: String,
     pub proxy_file: String,
     pub files: Vec<ManagedFile>,
-    pub baseline_backup: PathBuf,
-    pub previous_snapshot: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -207,7 +204,6 @@ pub enum Action {
     Update,
     Uninstall,
     DisableFrameGen,
-    Rollback,
 }
 
 impl Action {
@@ -218,7 +214,6 @@ impl Action {
             Self::Update => "更新",
             Self::Uninstall => "卸载",
             Self::DisableFrameGen => "关闭插帧",
-            Self::Rollback => "回滚",
         }
     }
 }

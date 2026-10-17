@@ -193,7 +193,7 @@ impl App {
                             title: "程序更新已写入".to_string(),
                             lines: vec![
                                 "关闭本窗口后重新打开即可使用新版本。".to_string(),
-                                format!("旧版本备份：{}", backup.display()),
+                                format!("上一版安装器：{}", backup.display()),
                             ],
                         });
                         self.close_after_update = true;
@@ -676,7 +676,6 @@ impl App {
                                     Action::Check,
                                     Action::Repair,
                                     Action::Update,
-                                    Action::Rollback,
                                     Action::DisableFrameGen,
                                     Action::Uninstall,
                                 ] {
@@ -806,7 +805,6 @@ fn spawn_worker(paths: Result<AppPaths, String>) -> (Sender<Command>, Receiver<E
                         Action::Check => install::check_install(paths, &game),
                         Action::Uninstall => install::uninstall(paths, &game),
                         Action::DisableFrameGen => install::disable_frame_gen(paths, &game),
-                        Action::Rollback => install::rollback(paths, &game),
                     };
                     let _ = event_tx.send(Event::Maintained { action, result });
                 }

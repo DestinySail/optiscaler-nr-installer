@@ -152,16 +152,3 @@ pub fn read_small_text(path: &Path, max: u64) -> Result<String, String> {
         .map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
     Ok(text)
 }
-
-pub fn copy_file(source: &Path, target: &Path) -> Result<(), String> {
-    if let Some(parent) = target.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("创建 {} 失败: {e}", parent.display()))?;
-    }
-    fs::copy(source, target).map(|_| ()).map_err(|e| {
-        format!(
-            "复制 {} 到 {} 失败: {e}",
-            source.display(),
-            target.display()
-        )
-    })
-}
