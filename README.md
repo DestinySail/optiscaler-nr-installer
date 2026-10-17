@@ -5,6 +5,7 @@ Rust / egui 编写的 Windows x64 安装器，只安装一套固定组合：
 **政宗 SAMA OptiScaler NR + Mochizuki 后端 + Intel XeFG（README 方案 1）**
 
 正常流程是：选择游戏 → 显示真实安装进度 → 完成。显卡检测、组件下载、校验、备份、INI 合并和安装记录都在后台完成。
+初装默认 2X；后续检查、修复和更新会保留用户在游戏内调整的 XeFG 倍率与帧生成开关。
 
 ## 当前实现
 

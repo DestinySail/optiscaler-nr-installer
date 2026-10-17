@@ -148,6 +148,7 @@ pub fn prepare(
     )?;
     let extras_root = find_extras_root(&extras_root)?;
     validate_extras(&extras_root)?;
+    validate_model_compatibility(&release_root, &extras_root)?;
 
     Ok(PreparedComponents {
         release_root,
@@ -210,6 +211,24 @@ fn validate_extras(root: &Path) -> Result<(), String> {
         if !root.join(item).is_file() {
             return Err(format!("固定资源缺少 {item}: {}", root.display()));
         }
+    }
+    Ok(())
+}
+
+fn validate_model_compatibility(release_root: &Path, extras_root: &Path) -> Result<(), String> {
+    let checksum_path = release_root.join("model-tools").join("dlssnr-int4.sha256");
+    let checksum = read_small_text(&checksum_path, 4096)?;
+    let expected = checksum
+        .split_whitespace()
+        .next()
+        .filter(|value| value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
+        .ok_or_else(|| format!("{} 不是有效的 SHA-256 清单", checksum_path.display()))?;
+    let int4 = extras_root.join("dlssnr-amd").join("dlssnr-int4.bin");
+    let actual = sha256_file(&int4)?;
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(format!(
+            "固定资源中的 dlssnr-int4.bin 与新主包不兼容：实际 {actual}，主包期望 {expected}。请等待维护者发布新版 extra。"
+        ));
     }
     Ok(())
 }

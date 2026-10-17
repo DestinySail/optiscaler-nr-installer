@@ -17,11 +17,12 @@
 
 ## 已验证
 
-- `cargo test`：10 项通过，包含 minisign 清单验签、篡改拒绝、单实例锁和 OptiScaler 标记识别。
+- `cargo test`：11 项通过，包含 minisign 清单验签、篡改拒绝、单实例锁、OptiScaler 标记识别和用户偏好保留。
 - `cargo clippy --all-targets -- -D warnings`：通过。
 - upstream v1.12.2：实际下载 203.7 MiB 压缩包，解压 990 项成功。
 - 在独立测试目录安装 840 个受管文件，检查通过。
 - 新版 `extras-v1.zip` 安装 841 个文件，`dlssnr-amd/dlssnr-int4.bin` 哈希与上游清单一致。
+- 安装前还会读取主包 `model-tools/dlssnr-int4.sha256`，固定 INT4 模型不匹配时停止，避免静默混用版本。
 - v1.12.2 → v1.12.1 → 回滚 v1.12.2：检查通过。
 - 关闭插帧：MFGUnlocker.asi 移出，`[FrameGen] Enabled=false`。
 - 卸载：840 个受管文件按基线清除，原始 `DummyGame.exe` 保留。
@@ -33,7 +34,7 @@
 - 发布清单：用临时 minisign 密钥签名 `update-manifest.json`，minisign CLI 验签通过；未提供密钥时脚本会移除旧测试签名。
 - 必装 `extras-v1.zip`：152,492,907 字节，SHA-256 `ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533`，包含已校验的 `dlssnr-int4.bin` 和来源说明。
 - 维护 `extras-maintenance-v1.zip`：212,830,627 字节，SHA-256 `0e36bfaf53ec4e4c74d463583714be8570a3abe49475c4b28f12b1104f169de2`，安装器不下载。
-- Release EXE：`OptiScalerNR.exe`，SHA-256 `0dbf8df782f13d8178e78a83aa7147735d3d5ed949602d9a89b607582bdeb017`。
+- Release EXE：`OptiScalerNR.exe`，SHA-256 `ec3baeb86d9f26b8d036e27cf2a423f91423be41d84a83c66c9400ad37caf384`。
 
 测试没有修改真实鸣潮目录，也没有启动游戏。
 

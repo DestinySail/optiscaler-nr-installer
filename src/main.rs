@@ -29,6 +29,10 @@ fn main() {
 }
 
 fn show_fatal(message: &str) {
+    eprintln!("{message}");
+    if std::env::args().skip(1).any(|arg| arg.starts_with("--")) {
+        return;
+    }
     use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
     let _ = unsafe {
         MessageBoxW(

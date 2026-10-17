@@ -52,11 +52,12 @@ pub fn install(
     let existing_record = read_json::<InstallRecord>(&record_path).ok();
     let proxy = choose_proxy(&game.game_dir, existing_record.as_ref())?;
     let ini_path = game.game_dir.join("OptiScaler.ini");
+    let ini_existed = ini_path.is_file();
     let template_ini = components.release_root.join("OptiScaler.ini");
 
     progress(Progress::new("预检查", "生成固定方案文件计划", Some(0.02)));
     let mut plan = build_plan(components, &proxy)?;
-    if ini_path.is_file() {
+    if ini_existed {
         plan.retain(|file| file.relative != "OptiScaler.ini");
     } else if !template_ini.is_file() {
         return Err("主组件缺少 OptiScaler.ini".to_string());
@@ -132,7 +133,7 @@ pub fn install(
             "合并 Mochizuki NR 与 XeFG 固定配置",
             Some(0.88),
         ));
-        ini::apply_fixed_profile(&ini_path, false)?;
+        ini::apply_fixed_profile(&ini_path, false, ini_existed)?;
 
         progress(Progress::new("验证", "校验所有受管文件", Some(0.94)));
         let mut managed = Vec::new();
@@ -177,7 +178,6 @@ pub fn install(
             extras_version: Some(components.extras_version.clone()),
             profile: crate::model::FIXED_PROFILE.to_string(),
             proxy_file: proxy.clone(),
-            frame_gen_enabled: true,
             files: managed,
             baseline_backup: existing_record
                 .as_ref()
@@ -224,7 +224,7 @@ pub fn check_install(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceRep
         }
         if file.relative_path.eq_ignore_ascii_case("OptiScaler.ini") {
             issues.extend(
-                ini::check_fixed_profile(&target, record.frame_gen_enabled)?
+                ini::check_fixed_profile(&target)?
                     .into_iter()
                     .map(|issue| format!("OptiScaler.ini：{issue}")),
             );
@@ -330,7 +330,7 @@ pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<Maintenanc
         });
         lines.push("已移出 MFGUnlocker.asi".to_string());
     }
-    ini::apply_fixed_profile(&ini_path, true)?;
+    ini::apply_fixed_profile(&ini_path, true, true)?;
     if let Some(ini_entry) = record
         .files
         .iter_mut()
@@ -338,7 +338,6 @@ pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<Maintenanc
     {
         ini_entry.sha256 = sha256_file(&ini_path)?;
     }
-    record.frame_gen_enabled = false;
     write_json_atomic(
         &paths.games.join(game_id(&game.exe)).join("record.json"),
         &record,

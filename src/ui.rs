@@ -16,7 +16,7 @@ use crate::model::{
 };
 use crate::self_update::{self, AppUpdateInfo};
 use crate::updates;
-use crate::util::{format_bytes, read_json, write_json_atomic};
+use crate::util::{file_contains_marker, format_bytes, read_json, write_json_atomic};
 
 #[derive(Debug)]
 enum Command {
@@ -67,7 +67,7 @@ pub struct App {
     draft: Settings,
     gpus: Vec<GpuInfo>,
     games: Vec<GameInfo>,
-    installed_tags: HashMap<String, String>,
+    install_statuses: HashMap<String, String>,
     selected_game: Option<usize>,
     upstream: Option<UpstreamRelease>,
     app_update: Option<AppUpdateInfo>,
@@ -101,7 +101,7 @@ impl App {
             draft: settings,
             gpus: Vec::new(),
             games: Vec::new(),
-            installed_tags: HashMap::new(),
+            install_statuses: HashMap::new(),
             selected_game: None,
             upstream: None,
             app_update: None,
@@ -218,21 +218,29 @@ impl App {
     }
 
     fn refresh_installed_tags(&mut self) {
-        self.installed_tags.clear();
+        self.install_statuses.clear();
         let Some(paths) = self.paths.as_ref().ok() else {
             return;
         };
         for game in &self.games {
-            if let Some(tag) = install::installed_tag(paths, game) {
-                self.installed_tags.insert(installed_key(&game.exe), tag);
-            }
+            let status = if let Some(tag) = install::installed_tag(paths, game) {
+                format!("已安装 {tag}")
+            } else if file_contains_marker(&game.game_dir.join("dxgi.dll"), "OptiScaler")
+                .unwrap_or(false)
+            {
+                "外部安装".to_string()
+            } else {
+                "未安装".to_string()
+            };
+            self.install_statuses
+                .insert(installed_key(&game.exe), status);
         }
     }
 
     fn install_status(&self, game: &GameInfo) -> String {
-        self.installed_tags
+        self.install_statuses
             .get(&installed_key(&game.exe))
-            .map(|tag| format!("已安装 {tag}"))
+            .cloned()
             .unwrap_or_else(|| "未安装".to_string())
     }
 

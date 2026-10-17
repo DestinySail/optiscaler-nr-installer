@@ -195,15 +195,9 @@ pub struct InstallRecord {
     pub extras_version: Option<String>,
     pub profile: String,
     pub proxy_file: String,
-    #[serde(default = "default_true")]
-    pub frame_gen_enabled: bool,
     pub files: Vec<ManagedFile>,
     pub baseline_backup: PathBuf,
     pub previous_snapshot: PathBuf,
-}
-
-fn default_true() -> bool {
-    true
 }
 
 #[derive(Debug, Clone)]
