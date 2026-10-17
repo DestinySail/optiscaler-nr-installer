@@ -88,6 +88,8 @@ dist/SHA256SUMS.txt
 3. 用 minisign 私钥签署清单。私钥只放发布环境，不能进入源码或 EXE。
 4. 应用只接受 `app-v*`、非 prerelease、版本号高于当前且清单签名有效的更新。
 
+当前发布公钥见 [release/update-key.pub](release/update-key.pub)；私钥不得提交，`.secrets/` 已被 Git 忽略。
+
 可在构建后生成清单并可选直接签名：
 
 ```powershell

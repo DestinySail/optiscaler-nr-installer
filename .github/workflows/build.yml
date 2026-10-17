@@ -13,7 +13,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
-      - run: cargo build --release
+      - run: cargo build --release --locked
+        env:
+          NR_RELEASE_REPO: ${{ github.repository }}
+          NR_UPDATE_PUBKEY: ${{ vars.NR_UPDATE_PUBKEY }}
+          NR_EXTRAS_VERSION: extras-v1
+          NR_EXTRAS_URL: https://github.com/${{ github.repository }}/releases/download/extras-v1/extras-v1.zip
+          NR_EXTRAS_SHA256: ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533
       - uses: actions/upload-artifact@v4
         with:
           name: optiscaler-nr-installer-windows-x64
