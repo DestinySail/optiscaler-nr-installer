@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "version": "0.2.0",
+  "platform": "windows-x64",
+  "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.2.0/OptiScalerNR.exe",
+  "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "notes": "signed fixture"
+}

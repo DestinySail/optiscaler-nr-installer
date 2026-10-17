@@ -28,6 +28,11 @@ $manifest = [ordered]@{
 $manifestPath = Join-Path $dist 'update-manifest.json'
 $manifest | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 $signaturePath = Join-Path $dist 'update-manifest.json.minisig'
+$manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLowerInvariant()
+@(
+    "$hash  OptiScalerNR.exe"
+    "$manifestHash  update-manifest.json"
+) | Set-Content -LiteralPath (Join-Path $dist "app-v$version.sha256") -Encoding ascii
 
 if ($MinisignKey) {
     if (-not (Get-Command minisign -ErrorAction SilentlyContinue)) {

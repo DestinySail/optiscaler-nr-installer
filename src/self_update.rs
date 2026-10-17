@@ -87,17 +87,33 @@ pub fn check(settings: &Settings) -> Result<Option<AppUpdateInfo>, String> {
         16 * 1024,
     )?)
     .map_err(|e| format!("更新签名不是 UTF-8: {e}"))?;
+    verify_manifest(
+        repo,
+        &manifest_bytes,
+        &signature_text,
+        public_key,
+        &version.to_string(),
+    )
+}
+
+fn verify_manifest(
+    repo: &str,
+    manifest_bytes: &[u8],
+    signature_text: &str,
+    public_key: &str,
+    expected_version: &str,
+) -> Result<Option<AppUpdateInfo>, String> {
     let signature =
-        Signature::decode(&signature_text).map_err(|e| format!("更新签名格式无效: {e}"))?;
+        Signature::decode(signature_text).map_err(|e| format!("更新签名格式无效: {e}"))?;
     let key = PublicKey::from_base64(public_key).map_err(|e| format!("内置更新公钥无效: {e}"))?;
-    key.verify(&manifest_bytes, &signature, false)
+    key.verify(manifest_bytes, &signature, false)
         .map_err(|e| format!("更新清单验签失败: {e}"))?;
-    let manifest = serde_json::from_slice::<UpdateManifest>(&manifest_bytes)
+    let manifest = serde_json::from_slice::<UpdateManifest>(manifest_bytes)
         .map_err(|e| format!("更新清单 JSON 无效: {e}"))?;
     if manifest.schema != 1 || manifest.platform != "windows-x64" {
         return Err("更新清单平台或格式不受支持".to_string());
     }
-    if manifest.version != version.to_string() {
+    if manifest.version != expected_version {
         return Err("更新清单版本与 Release tag 不一致".to_string());
     }
     if manifest.sha256.len() != 64 || !manifest.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -166,4 +182,60 @@ fn fetch_small(
         return Err(format!("更新清单超过 {limit} 字节限制"));
     }
     Ok(bytes.to_vec())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_PUBLIC_KEY: &str = "RWRZRk4J8IpdBVApDDKTOdBHzSt0ctpCowVtK54cwnNkzMh5S6dyHCTO";
+
+    #[test]
+    fn verifies_signed_manifest_and_rejects_tampering() {
+        let manifest = include_bytes!("../tests/fixtures/update-manifest.json");
+        let signature = include_str!("../tests/fixtures/update-manifest.json.minisig");
+        let parsed = verify_manifest(
+            "DestinySail/optiscaler-nr-installer",
+            manifest,
+            signature,
+            TEST_PUBLIC_KEY,
+            "0.2.0",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(parsed.version, "0.2.0");
+        assert!(
+            verify_manifest(
+                "DestinySail/optiscaler-nr-installer",
+                manifest,
+                signature,
+                TEST_PUBLIC_KEY,
+                "0.3.0",
+            )
+            .is_err()
+        );
+        assert!(
+            verify_manifest(
+                "someone/else",
+                manifest,
+                signature,
+                TEST_PUBLIC_KEY,
+                "0.2.0",
+            )
+            .is_err()
+        );
+
+        let mut tampered = manifest.to_vec();
+        tampered[10] ^= 1;
+        assert!(
+            verify_manifest(
+                "DestinySail/optiscaler-nr-installer",
+                &tampered,
+                signature,
+                TEST_PUBLIC_KEY,
+                "0.2.0",
+            )
+            .is_err()
+        );
+    }
 }

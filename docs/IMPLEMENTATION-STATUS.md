@@ -16,15 +16,18 @@
 
 ## 已验证
 
-- `cargo test`：6 项通过。
+- `cargo test`：7 项通过，包含 minisign 清单验签和篡改拒绝。
 - `cargo clippy --all-targets -- -D warnings`：通过。
 - upstream v1.12.2：实际下载 203.7 MiB 压缩包，解压 990 项成功。
 - 在独立测试目录安装 840 个受管文件，检查通过。
 - v1.12.2 → v1.12.1 → 回滚 v1.12.2：检查通过。
 - 关闭插帧：MFGUnlocker.asi 移出，`[FrameGen] Enabled=false`。
 - 卸载：840 个受管文件按基线清除，原始 `DummyGame.exe` 保留。
+- 代理冲突：预先放入第三方 `dxgi.dll` 时选择 `winmm.dll`，第三方文件哈希不变，自定义 INI 段保留。
+- 检查/修复：篡改 `dlssnr-amd/shaders/accumulation.txt` 后检查报告 1 个问题，修复后检查通过。
+- 中途失败：锁定 `MFGUnlocker.asi` 令替换失败，已写入的代理、INI、runtime 被回滚，原锁定文件保留，事务日志清除。
 - `extras-v1.zip`：317,857,005 字节，SHA-256 `f3d649477ee83a8281e3f5e7cbc45c25486289c3a0b6b0fa860fa725ad8f99bf`。
-- Release EXE：`OptiScalerNR.exe`，11,479,040 字节，SHA-256 `def666d6b7b554db4cd72b50abbd9bd3ce960d44ffd1ac4c8209dac2b7f90a09`。
+- Release EXE：`OptiScalerNR.exe`，SHA-256 `c47343804fe019b04c31de913e9b22f0a122904dcc84bc7a27fb1c6badb6223c`。
 
 测试没有修改真实鸣潮目录，也没有启动游戏。
 

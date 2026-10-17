@@ -1,6 +1,6 @@
 /target
 /dist
-/test-game
+/test-*/
 /ui-preview.png
 /ui-maintenance.png
 /.secrets
