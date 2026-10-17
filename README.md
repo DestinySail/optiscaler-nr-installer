@@ -60,6 +60,8 @@ dist/SHA256SUMS.txt
 
 把 ZIP 和校验文件上传到 `extras-v1` Release。ZIP 根目录保持 `MFGUnlocker.asi`、`dlssnr-amd\dlssnr.bin` 的相对布局。发行前确认模型与二进制的再分发许可，并保留原项目署名。
 
+来源清单见 [release/EXTRAS-NOTICES.md](release/EXTRAS-NOTICES.md)。
+
 ## 应用发布与自更新
 
 1. 创建 `app-v0.2.0` 等独立 tag，上传 `OptiScalerNR.exe`、`update-manifest.json` 和 `update-manifest.json.minisig`。

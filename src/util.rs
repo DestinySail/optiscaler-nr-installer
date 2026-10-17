@@ -129,6 +129,42 @@ pub fn game_id(exe: &Path) -> String {
     hex_lower(&digest[..8])
 }
 
+pub fn file_contains_marker(path: &Path, marker: &str) -> Result<bool, String> {
+    let mut file = File::open(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+    let ascii = marker.as_bytes();
+    let utf16 = marker
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect::<Vec<_>>();
+    let overlap = (ascii.len().max(utf16.len()) - 1).min(256);
+    let mut carry = Vec::new();
+    let mut buf = vec![0u8; 1024 * 1024];
+    loop {
+        let read = file
+            .read(&mut buf)
+            .map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+        if read == 0 {
+            return Ok(false);
+        }
+        let mut window = Vec::with_capacity(carry.len() + read);
+        window.extend_from_slice(&carry);
+        window.extend_from_slice(&buf[..read]);
+        if contains(&window, ascii) || contains(&window, &utf16) {
+            return Ok(true);
+        }
+        carry.clear();
+        let start = window.len().saturating_sub(overlap);
+        carry.extend_from_slice(&window[start..]);
+    }
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -141,5 +177,17 @@ mod tests {
             safe_relative(Path::new("OptiScaler/libxess.dll")).unwrap(),
             PathBuf::from("OptiScaler").join("libxess.dll")
         );
+    }
+
+    #[test]
+    fn finds_ascii_and_utf16_markers() {
+        assert!(contains(b"xxOptiScalerxx", b"OptiScaler"));
+        let utf16 = "OptiScaler"
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        let mut data = b"prefix".to_vec();
+        data.extend_from_slice(&utf16);
+        assert!(contains(&data, &utf16));
     }
 }

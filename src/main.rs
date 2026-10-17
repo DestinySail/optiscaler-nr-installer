@@ -9,15 +9,35 @@ mod install;
 mod model;
 mod pe;
 mod self_update;
+mod single_instance;
 mod ui;
 mod updates;
 mod util;
 
 fn main() {
+    let _instance = match single_instance::acquire() {
+        Ok(guard) => guard,
+        Err(error) => {
+            show_fatal(&error);
+            std::process::exit(2);
+        }
+    };
     if let Err(error) = run() {
-        eprintln!("{error}");
+        show_fatal(&error);
         std::process::exit(1);
     }
+}
+
+fn show_fatal(message: &str) {
+    use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+    let _ = unsafe {
+        MessageBoxW(
+            None,
+            &windows::core::HSTRING::from(message),
+            windows::core::w!("OptiScaler NR Installer"),
+            MB_OK | MB_ICONERROR,
+        )
+    };
 }
 
 fn run() -> Result<(), String> {

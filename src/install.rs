@@ -9,7 +9,8 @@ use crate::assets::PreparedComponents;
 use crate::ini;
 use crate::model::{AppPaths, GameInfo, InstallRecord, MaintenanceReport, ManagedFile, Progress};
 use crate::util::{
-    game_id, now_ms, process_is_running, read_json, safe_relative, sha256_file, write_json_atomic,
+    file_contains_marker, game_id, now_ms, process_is_running, read_json, safe_relative,
+    sha256_file, write_json_atomic,
 };
 
 #[derive(Debug, Clone)]
@@ -531,7 +532,9 @@ fn choose_proxy(game_dir: &Path, record: Option<&InstallRecord>) -> Result<Strin
         "version.dll",
         "dbghelp.dll",
     ] {
-        if !game_dir.join(candidate).exists() {
+        let path = game_dir.join(candidate);
+        if !path.exists() || (candidate == "dxgi.dll" && file_contains_marker(&path, "OptiScaler")?)
+        {
             return Ok(candidate.to_string());
         }
     }

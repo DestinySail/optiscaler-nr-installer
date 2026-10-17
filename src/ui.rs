@@ -563,8 +563,20 @@ impl App {
                                 let _ = self.sender.send(Command::ApplyAppUpdate(update.clone()));
                             }
                         }
+                        if ui.button("立即检查更新").clicked() {
+                            self.status = "正在检查更新…".to_string();
+                            let _ = self
+                                .sender
+                                .send(Command::CheckUpdates(self.settings.clone()));
+                        }
                         ui.add_space(10.0);
                         ui.separator();
+                        ui.strong("安装器发布仓库");
+                        ui.horizontal(|ui| {
+                            ui.label("GitHub");
+                            ui.text_edit_singleline(&mut self.draft.release_repo);
+                        });
+                        ui.add_space(8.0);
                         ui.strong("固定资源");
                         ui.label("extra 文件作为独立 Release 附件提供，程序只读取固定版本和哈希。");
                         ui.horizontal(|ui| {
