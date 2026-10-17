@@ -15,11 +15,16 @@ mod updates;
 mod util;
 
 fn main() {
-    let _instance = match single_instance::acquire() {
-        Ok(guard) => guard,
-        Err(error) => {
-            show_fatal(&error);
-            std::process::exit(2);
+    let diagnose_only = std::env::args().any(|arg| arg == "--diagnose");
+    let _instance = if diagnose_only {
+        None
+    } else {
+        match single_instance::acquire() {
+            Ok(guard) => Some(guard),
+            Err(error) => {
+                show_fatal(&error);
+                std::process::exit(2);
+            }
         }
     };
     if let Err(error) = run() {
@@ -110,6 +115,9 @@ fn diagnose() -> Result<(), String> {
             game.launcher,
             game.exe.display()
         );
+    }
+    if let Some(path) = games::default_picker_directory() {
+        println!("PICKER: {}", path.display());
     }
     match updates::check_upstream(&paths) {
         Ok(release) => println!(

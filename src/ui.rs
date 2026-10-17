@@ -282,10 +282,13 @@ impl App {
     }
 
     fn choose_game_exe(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("游戏 EXE", &["exe"])
-            .pick_file()
-        else {
+        let mut dialog = rfd::FileDialog::new().add_filter("游戏 EXE", &["exe"]);
+        if let Some(game) = self.selected_game() {
+            dialog = dialog.set_directory(&game.game_dir);
+        } else if let Some(directory) = games::default_picker_directory() {
+            dialog = dialog.set_directory(directory);
+        }
+        let Some(path) = dialog.pick_file() else {
             return;
         };
         match games::inspect_manual(path) {

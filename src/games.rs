@@ -9,7 +9,6 @@ use winreg::enums::{
 
 use crate::model::{Compatibility, GameInfo};
 use crate::pe;
-use crate::util::hidden_command;
 
 const KNOWN_EXES: &[(&str, Compatibility)] = &[
     ("Client-Win64-Shipping.exe", Compatibility::Known),
@@ -32,6 +31,22 @@ const BAD_EXE_PARTS: &[&str] = &[
     "editor",
     "server",
     "tool",
+    "helper",
+    "anticheat",
+    "easyanticheat",
+    "battleye",
+    "installer",
+    "wallpaper",
+    "browser",
+];
+
+const MIN_EXE_BYTES: u64 = 64 * 1024;
+
+const NON_GAME_STEAM_NAMES: &[&str] = &[
+    "steamworks common redistributables",
+    "steamvr",
+    "steam controller configs",
+    "wallpaper engine",
 ];
 
 pub fn discover_games() -> Vec<GameInfo> {
@@ -57,6 +72,14 @@ pub fn discover_games() -> Vec<GameInfo> {
     }
     found.sort_by_key(|game| game.name.to_ascii_lowercase());
     found
+}
+
+pub fn default_picker_directory() -> Option<PathBuf> {
+    steam_library_roots()
+        .into_iter()
+        .map(|root| root.join("steamapps").join("common"))
+        .find(|common| common.is_dir())
+        .or_else(|| kuro_roots().into_iter().next())
 }
 
 pub fn inspect_manual(exe: PathBuf) -> Result<GameInfo, String> {
@@ -89,8 +112,8 @@ pub fn inspect_manual(exe: PathBuf) -> Result<GameInfo, String> {
 
 fn steam_library_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    if let Some(path) = reg_value("HKCU\\Software\\Valve\\Steam", "SteamPath") {
-        push_library_root(&mut roots, PathBuf::from(path));
+    if let Some(path) = steam_path() {
+        push_library_root(&mut roots, path);
     }
     for var in ["ProgramFiles(x86)", "ProgramFiles"] {
         if let Some(base) = std::env::var_os(var) {
@@ -121,6 +144,15 @@ fn steam_library_roots() -> Vec<PathBuf> {
     expanded
 }
 
+fn steam_path() -> Option<PathBuf> {
+    RegKey::predef(HKEY_CURRENT_USER)
+        .open_subkey(r"Software\Valve\Steam")
+        .ok()?
+        .get_value::<String, _>("SteamPath")
+        .ok()
+        .map(PathBuf::from)
+}
+
 fn push_library_root(roots: &mut Vec<PathBuf>, path: PathBuf) {
     if path.join("steamapps").is_dir() {
         roots.push(path);
@@ -133,19 +165,84 @@ fn scan_library(
     seen: &mut HashSet<String>,
     found: &mut Vec<GameInfo>,
 ) {
-    let common = steam_root.join("steamapps").join("common");
-    let Ok(entries) = fs::read_dir(common) else {
+    let steamapps = steam_root.join("steamapps");
+    let common = steamapps.join("common");
+    let Ok(entries) = fs::read_dir(&steamapps) else {
         return;
     };
-    for entry in entries.flatten().take(500) {
-        if !entry.file_type().map(|v| v.is_dir()).unwrap_or(false) {
+    let mut manifests = entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            name.starts_with("appmanifest_") && name.ends_with(".acf")
+        })
+        .take(500)
+        .collect::<Vec<_>>();
+
+    if manifests.is_empty() {
+        let Ok(entries) = fs::read_dir(common) else {
+            return;
+        };
+        manifests = entries
+            .flatten()
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+            .take(500)
+            .collect();
+        for entry in manifests {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if let Some(game) = scan_game_dir(&name, launcher, &entry.path()) {
+                push_unique(game, seen, found);
+            }
+        }
+        return;
+    }
+
+    for manifest in manifests {
+        let Ok(text) = fs::read_to_string(manifest.path()) else {
+            continue;
+        };
+        let Some(name) = acf_value(&text, "name") else {
+            continue;
+        };
+        if NON_GAME_STEAM_NAMES
+            .iter()
+            .any(|tool| name.eq_ignore_ascii_case(tool))
+        {
             continue;
         }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if let Some(game) = scan_game_dir(&name, launcher, &entry.path()) {
+        if let Some(flags) = acf_value(&text, "StateFlags")
+            && let Ok(flags) = flags.parse::<u32>()
+            && flags & 4 == 0
+        {
+            continue;
+        }
+        let Some(install_dir) = acf_value(&text, "installdir") else {
+            continue;
+        };
+        if !is_single_folder_name(&install_dir) {
+            continue;
+        }
+        let root = common.join(install_dir);
+        if root.is_dir()
+            && let Some(game) = scan_game_dir(&name, launcher, &root)
+        {
             push_unique(game, seen, found);
         }
     }
+}
+
+fn acf_value(text: &str, key: &str) -> Option<String> {
+    text.lines().find_map(|line| {
+        let values = quoted_values(line);
+        (values.len() >= 2 && values[0].eq_ignore_ascii_case(key))
+            .then(|| values[1].trim().to_string())
+    })
+}
+
+fn is_single_folder_name(value: &str) -> bool {
+    !value.trim_end_matches(['.', ' ']).is_empty()
+        && !Path::new(value).is_absolute()
+        && !value.contains(['\\', '/', ':'])
 }
 
 fn epic_games() -> Vec<(String, PathBuf)> {
@@ -276,7 +373,7 @@ fn path_from_registry_value(value: &str) -> Option<PathBuf> {
 
 fn scan_game_dir(name: &str, launcher: &str, root: &Path) -> Option<GameInfo> {
     let mut candidates = Vec::new();
-    collect_exes(root, 0, &mut candidates);
+    collect_exes(root, 0, name, &mut candidates);
     candidates.sort_by_key(|(score, _, _)| *score);
     candidates.pop().map(|(_, exe, info)| {
         let wuthering = root
@@ -301,7 +398,12 @@ fn scan_game_dir(name: &str, launcher: &str, root: &Path) -> Option<GameInfo> {
     })
 }
 
-fn collect_exes(root: &Path, depth: usize, out: &mut Vec<(u64, PathBuf, pe::PeInfo)>) {
+fn collect_exes(
+    root: &Path,
+    depth: usize,
+    game_name: &str,
+    out: &mut Vec<(u64, PathBuf, pe::PeInfo)>,
+) {
     if depth > 6 || out.len() > 200 {
         return;
     }
@@ -317,9 +419,15 @@ fn collect_exes(root: &Path, depth: usize, out: &mut Vec<(u64, PathBuf, pe::PeIn
             let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
             if !matches!(
                 name.as_str(),
-                "_commonredist" | "redist" | "redistributables" | "support" | "tools" | "editor"
+                "_commonredist"
+                    | "redist"
+                    | "redistributables"
+                    | "support"
+                    | "tools"
+                    | "editor"
+                    | "engine"
             ) {
-                collect_exes(&path, depth + 1, out);
+                collect_exes(&path, depth + 1, game_name, out);
             }
             continue;
         }
@@ -329,14 +437,14 @@ fn collect_exes(root: &Path, depth: usize, out: &mut Vec<(u64, PathBuf, pe::PeIn
         if !name.to_ascii_lowercase().ends_with(".exe") {
             continue;
         }
-        let lower = name.to_ascii_lowercase();
-        if BAD_EXE_PARTS.iter().any(|part| lower.contains(part)) {
+        if !is_game_exe_name(name) {
             continue;
         }
+        let lower = name.to_ascii_lowercase();
         let Ok(meta) = entry.metadata() else {
             continue;
         };
-        if meta.len() < 4 * 1024 * 1024 {
+        if meta.len() < MIN_EXE_BYTES {
             continue;
         }
         let Ok(info) = pe::inspect(&path) else {
@@ -346,6 +454,15 @@ fn collect_exes(root: &Path, depth: usize, out: &mut Vec<(u64, PathBuf, pe::PeIn
             continue;
         }
         let mut score = (meta.len() / (1024 * 1024)).min(500);
+        let exe_stem = path.file_stem().and_then(|v| v.to_str()).unwrap_or("");
+        let normalized_exe = normalize_name(exe_stem);
+        let normalized_game = normalize_name(game_name);
+        if normalized_exe.len() >= 3
+            && (normalized_game.starts_with(&normalized_exe)
+                || normalized_exe.starts_with(&normalized_game))
+        {
+            score += 6_000;
+        }
         if KNOWN_EXES
             .iter()
             .any(|(known, _)| lower.eq_ignore_ascii_case(&known.to_ascii_lowercase()))
@@ -362,11 +479,28 @@ fn collect_exes(root: &Path, depth: usize, out: &mut Vec<(u64, PathBuf, pe::PeIn
             )
         }) {
             score += 1_000;
+        } else if info
+            .imports
+            .iter()
+            .any(|import| import.eq_ignore_ascii_case("d3d11.dll"))
+        {
+            score += 300;
         }
-        if score >= 1_000 {
-            out.push((score, path, info));
-        }
+        out.push((score, path, info));
     }
+}
+
+fn is_game_exe_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    !BAD_EXE_PARTS.iter().any(|part| lower.contains(part))
+}
+
+fn normalize_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
 }
 
 fn display_name(folder: &str, exe: &Path) -> String {
@@ -408,18 +542,6 @@ fn quoted_values(line: &str) -> Vec<String> {
         .collect()
 }
 
-fn reg_value(key: &str, value: &str) -> Option<String> {
-    let output = hidden_command("reg")
-        .args(["query", key, "/v", value])
-        .output()
-        .ok()?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines()
-        .find(|line| line.trim_start().starts_with(value))
-        .and_then(|line| line.split_whitespace().last())
-        .map(ToOwned::to_owned)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,5 +552,23 @@ mod tests {
             quoted_values("\"path\" \"D:\\\\SteamLibrary\""),
             vec!["path", "D:\\\\SteamLibrary"]
         );
+    }
+
+    #[test]
+    fn parses_steam_manifest_fields() {
+        let manifest = "\"AppState\"\n{\n    \"appid\" \"3357650\"\n    \"name\" \"PRAGMATA\"\n    \"installdir\" \"PRAGMATA\"\n}";
+        assert_eq!(acf_value(manifest, "name").as_deref(), Some("PRAGMATA"));
+        assert_eq!(
+            acf_value(manifest, "installdir").as_deref(),
+            Some("PRAGMATA")
+        );
+    }
+
+    #[test]
+    fn rejects_helpers_but_keeps_small_game_exes() {
+        assert!(is_game_exe_name("WarmSnow.exe"));
+        assert!(is_game_exe_name("EDF6.exe"));
+        assert!(!is_game_exe_name("UnityCrashHandler64.exe"));
+        assert!(!is_game_exe_name("ZFGameBrowser.exe"));
     }
 }
