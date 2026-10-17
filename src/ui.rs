@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
@@ -66,6 +67,7 @@ pub struct App {
     draft: Settings,
     gpus: Vec<GpuInfo>,
     games: Vec<GameInfo>,
+    installed_tags: HashMap<String, String>,
     selected_game: Option<usize>,
     upstream: Option<UpstreamRelease>,
     app_update: Option<AppUpdateInfo>,
@@ -99,6 +101,7 @@ impl App {
             draft: settings,
             gpus: Vec::new(),
             games: Vec::new(),
+            installed_tags: HashMap::new(),
             selected_game: None,
             upstream: None,
             app_update: None,
@@ -128,6 +131,7 @@ impl App {
                     if self.selected_game.is_none() && !self.games.is_empty() {
                         self.selected_game = Some(0);
                     }
+                    self.refresh_installed_tags();
                     self.status = format!("已发现 {} 个候选游戏", self.games.len());
                 }
                 Event::Checked {
@@ -165,6 +169,7 @@ impl App {
                     Ok(report) => {
                         self.report = Some(report);
                         self.screen = Screen::Done;
+                        self.refresh_installed_tags();
                     }
                     Err(error) => {
                         self.error = Some(error);
@@ -180,6 +185,7 @@ impl App {
                             lines: vec![error],
                         },
                     });
+                    self.refresh_installed_tags();
                 }
                 Event::AppUpdateApplied(result) => match result {
                     Ok(backup) => {
@@ -209,6 +215,25 @@ impl App {
 
     fn selected_game(&self) -> Option<&GameInfo> {
         self.selected_game.and_then(|index| self.games.get(index))
+    }
+
+    fn refresh_installed_tags(&mut self) {
+        self.installed_tags.clear();
+        let Some(paths) = self.paths.as_ref().ok() else {
+            return;
+        };
+        for game in &self.games {
+            if let Some(tag) = install::installed_tag(paths, game) {
+                self.installed_tags.insert(installed_key(&game.exe), tag);
+            }
+        }
+    }
+
+    fn install_status(&self, game: &GameInfo) -> String {
+        self.installed_tags
+            .get(&installed_key(&game.exe))
+            .map(|tag| format!("已安装 {tag}"))
+            .unwrap_or_else(|| "未安装".to_string())
     }
 
     fn can_install(&self) -> bool {
@@ -259,6 +284,7 @@ impl App {
             Ok(game) => {
                 self.games.push(game);
                 self.selected_game = Some(self.games.len() - 1);
+                self.refresh_installed_tags();
             }
             Err(error) => self.error = Some(error),
         }
@@ -364,7 +390,7 @@ impl App {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(format!(
-                                "{}  ·  {}  ·  {}",
+                                "{}  ·  {}  ·  {}  ·  {}",
                                 game.compatibility.label(),
                                 if game
                                     .imports
@@ -381,6 +407,7 @@ impl App {
                                 } else {
                                     "图形 API 待确认"
                                 },
+                                self.install_status(&game),
                                 game.game_dir.display()
                             ))
                             .small()
@@ -832,4 +859,11 @@ fn timestamp(ms: u64) -> String {
     let hours = remainder / 3_600;
     let minutes = (remainder % 3_600) / 60;
     format!("Unix {days}d {hours:02}:{minutes:02} UTC")
+}
+
+fn installed_key(exe: &Path) -> String {
+    exe.canonicalize()
+        .unwrap_or_else(|_| exe.to_path_buf())
+        .to_string_lossy()
+        .to_ascii_lowercase()
 }

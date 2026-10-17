@@ -1,14 +1,13 @@
 {
   "version": "extras-v1",
   "asset": "extras-v1.zip",
-  "sha256": "4f6da6b80688fc4fe18e4df241234aa2020e1414ca2b4060034895505d2e4479",
+  "sha256": "ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533",
   "url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/extras-v1/extras-v1.zip",
   "contents": [
+    "EXTRAS-NOTICES.md",
     "MFGUnlocker.asi",
     "dlssnr-amd/dlssnr.bin",
-    "dlssnr-amd/dlssnr-int4.bin",
-    "nvngx_dlssnr.dll",
-    "dlssnr_on_amd_weights.bin"
+    "dlssnr-amd/dlssnr-int4.bin"
   ],
   "deployed": [
     "MFGUnlocker.asi -> OptiScaler/plugins/MFGUnlocker.asi",

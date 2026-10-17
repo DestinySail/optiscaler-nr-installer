@@ -252,6 +252,12 @@ pub fn check_install(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceRep
     Ok(MaintenanceReport { title, lines })
 }
 
+pub fn installed_tag(paths: &AppPaths, game: &GameInfo) -> Option<String> {
+    read_json::<InstallRecord>(&paths.games.join(game_id(&game.exe)).join("record.json"))
+        .ok()
+        .map(|record| record.upstream_tag)
+}
+
 pub fn uninstall(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport, String> {
     if process_is_running(&game.exe)? {
         return Err("游戏正在运行，请完全退出后再卸载".to_string());

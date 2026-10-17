@@ -1,0 +1,12 @@
+{
+  "version": "extras-maintenance-v1",
+  "asset": "extras-maintenance-v1.zip",
+  "sha256": "0e36bfaf53ec4e4c74d463583714be8570a3abe49475c4b28f12b1104f169de2",
+  "url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/extras-maintenance-v1/extras-maintenance-v1.zip",
+  "contents": [
+    "EXTRAS-NOTICES.md",
+    "nvngx_dlssnr.dll",
+    "dlssnr_on_amd_weights.bin"
+  ],
+  "note": "维护/再生成材料。安装器不下载、不部署这两个文件。"
+}

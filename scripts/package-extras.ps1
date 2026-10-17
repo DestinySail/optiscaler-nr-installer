@@ -1,17 +1,30 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$SourceDir,
-    [string]$Version = 'extras-v1'
+    [string]$Version = 'extras-v1',
+    [ValidateSet('runtime', 'maintenance')]
+    [string]$Kind = 'runtime'
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $source = (Resolve-Path -LiteralPath $SourceDir).Path
-$required = @(
-    (Join-Path $source 'MFGUnlocker.asi'),
-    (Join-Path $source 'dlssnr-amd\dlssnr.bin'),
-    (Join-Path $source 'dlssnr-amd\dlssnr-int4.bin')
-)
+if ($Kind -eq 'maintenance' -and -not $PSBoundParameters.ContainsKey('Version')) {
+    $Version = 'extras-maintenance-v1'
+}
+$required = if ($Kind -eq 'maintenance') {
+    @(
+        (Join-Path $source 'nvngx_dlssnr.dll'),
+        (Join-Path $source 'dlssnr_on_amd_weights.bin')
+    )
+}
+else {
+    @(
+        (Join-Path $source 'MFGUnlocker.asi'),
+        (Join-Path $source 'dlssnr-amd\dlssnr.bin'),
+        (Join-Path $source 'dlssnr-amd\dlssnr-int4.bin')
+    )
+}
 foreach ($item in $required) {
     if (-not (Test-Path -LiteralPath $item -PathType Leaf)) {
         throw "固定资源缺少 $item"
@@ -19,6 +32,7 @@ foreach ($item in $required) {
 }
 
 $repo = Split-Path -Parent $PSScriptRoot
+$repoRoot = $repo
 $dist = Join-Path $repo 'dist'
 New-Item -ItemType Directory -Path $dist -Force | Out-Null
 $zip = Join-Path $dist "$Version.zip"
@@ -26,7 +40,7 @@ if (Test-Path -LiteralPath $zip) {
     Remove-Item -LiteralPath $zip -Force
 }
 
-$entries = Get-ChildItem -LiteralPath $source -Recurse -File
+$entries = $required | ForEach-Object { Get-Item -LiteralPath $_ }
 $archive = [System.IO.Compression.ZipFile]::Open(
     $zip,
     [System.IO.Compression.ZipArchiveMode]::Create
@@ -38,6 +52,15 @@ try {
             $archive,
             $file.FullName,
             $relative,
+            [System.IO.Compression.CompressionLevel]::Optimal
+        ) | Out-Null
+    }
+    $notice = Join-Path $repoRoot 'release\EXTRAS-NOTICES.md'
+    if (Test-Path -LiteralPath $notice) {
+        [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+            $archive,
+            $notice,
+            'EXTRAS-NOTICES.md',
             [System.IO.Compression.CompressionLevel]::Optimal
         ) | Out-Null
     }

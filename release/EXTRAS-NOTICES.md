@@ -2,6 +2,8 @@
 
 该资源包不是安装器 MIT 许可证的一部分。各文件继续适用其原项目许可证；公开发布前需要由维护者确认再分发条件。
 
+`extras-v1` 只包含实际部署的三个文件；`extras-maintenance-v1` 单独保留不参与安装的源 DLL 与 Daniel 权重。
+
 | 文件 | 来源/用途 | 安装器行为 |
 |---|---|---|
 | `MFGUnlocker.asi` | dashdogy/MFG-Unlocker，当前包标记 v1.5.0 | 部署到 `OptiScaler/plugins/` |

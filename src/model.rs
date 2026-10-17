@@ -10,7 +10,7 @@ pub const DEFAULT_RELEASE_REPO: &str = "DestinySail/optiscaler-nr-installer";
 pub const DEFAULT_EXTRAS_VERSION: &str = "extras-v1";
 pub const DEFAULT_EXTRAS_URL: &str = "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/extras-v1/extras-v1.zip";
 pub const DEFAULT_EXTRAS_SHA256: &str =
-    "4f6da6b80688fc4fe18e4df241234aa2020e1414ca2b4060034895505d2e4479";
+    "ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533";
 
 #[derive(Debug, Clone)]
 pub struct AppPaths {
