@@ -1,0 +1,8 @@
+/target
+/dist
+/test-game
+/ui-preview.png
+/ui-maintenance.png
+/.secrets
+*.minisign.key
+*.pem

@@ -1,0 +1,30 @@
+[package]
+name = "optiscaler-nr-installer"
+version = "0.1.0"
+edition = "2024"
+description = "Windows installer for the fixed OptiScaler NR + Mochizuki + XeFG profile"
+license = "MIT"
+repository = "https://github.com/DestinySail/optiscaler-nr-installer"
+
+[[bin]]
+name = "OptiScalerNR"
+path = "src/main.rs"
+
+[dependencies]
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "default_fonts", "glow"] }
+minisign-verify = { version = "0.3.0", default-features = false }
+reqwest = { version = "0.13.5", default-features = false, features = ["blocking", "json", "rustls"] }
+rfd = { version = "0.17.2", default-features = false }
+self-replace = { version = "1.5.0", default-features = false }
+semver = { version = "1.0.28", default-features = false, features = ["std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154" }
+sha2 = { version = "0.11.1", default-features = false }
+windows = { version = "0.62.2", default-features = false, features = ["Win32_Graphics_Dxgi"] }
+winreg = "0.56.0"
+zip = { version = "9.0.4", default-features = false, features = ["deflate"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
