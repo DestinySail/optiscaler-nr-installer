@@ -6,6 +6,7 @@
 |---|---|---|
 | `MFGUnlocker.asi` | dashdogy/MFG-Unlocker，当前包标记 v1.5.0 | 部署到 `OptiScaler/plugins/` |
 | `dlssnr-amd/dlssnr.bin` | 由 Mochizuki 工具从 NVIDIA 310.8.0 DLSS-NR 运行库提取，主包附带的模型 | 部署到 `dlssnr-amd/` |
+| `dlssnr-amd/dlssnr-int4.bin` | 由主模型和上游 `dlssnr-int4-weights.exe` 生成，SHA-256 `22a0e2d3db1c2101a67e0d9aad066e0916afbc32cba47820f5ad24d46602319c` | 部署到 `dlssnr-amd/` |
 | `nvngx_dlssnr.dll` | NVIDIA DLSS-NR 310.8.0，作为固定源材料存档 | 当前固定方案不部署 |
 | `dlssnr_on_amd_weights.bin` | danielblnc/DLSS-NR-on-AMD 后端权重，当前方案不使用 | 当前固定方案不部署 |
 

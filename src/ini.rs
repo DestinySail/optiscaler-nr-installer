@@ -45,6 +45,48 @@ pub fn apply_fixed_profile(path: &Path, disable_frame_gen: bool) -> Result<Vec<S
     Ok(changes)
 }
 
+pub fn check_fixed_profile(path: &Path, frame_gen_enabled: bool) -> Result<Vec<String>, String> {
+    let bytes = fs::read(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+    let text = std::str::from_utf8(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))
+        .map_err(|e| format!("{} 不是 UTF-8: {e}", path.display()))?;
+    let normalized = text.replace("\r\n", "\n");
+    let lines = normalized.split('\n').collect::<Vec<_>>();
+    let mut issues = Vec::new();
+    for (section, key, configured) in REQUIRED {
+        let expected = if *section == "FrameGen" && *key == "Enabled" {
+            if frame_gen_enabled { "true" } else { "false" }
+        } else {
+            configured
+        };
+        let Some((start, end)) = find_section_str(&lines, section) else {
+            issues.push(format!("缺少配置段 [{section}]"));
+            continue;
+        };
+        let values = lines[start + 1..end]
+            .iter()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.starts_with(';') || line.starts_with('#') {
+                    return None;
+                }
+                let (actual_key, value) = line.split_once('=')?;
+                actual_key
+                    .trim()
+                    .eq_ignore_ascii_case(key)
+                    .then(|| value.trim().to_string())
+            })
+            .collect::<Vec<_>>();
+        if values.len() > 1 {
+            issues.push(format!("[{section}] {key} 重复"));
+        } else if values.is_empty() {
+            issues.push(format!("缺少 [{section}] {key}"));
+        } else if !values[0].eq_ignore_ascii_case(expected) {
+            issues.push(format!("[{section}] {key}={}，期望 {expected}", values[0]));
+        }
+    }
+    Ok(issues)
+}
+
 fn ensure_value(
     lines: &mut Vec<String>,
     section: &str,
@@ -122,6 +164,28 @@ fn find_section(lines: &[String], wanted: &str) -> Option<(usize, usize)> {
     Some((start, end))
 }
 
+fn find_section_str(lines: &[&str], wanted: &str) -> Option<(usize, usize)> {
+    let start = lines.iter().position(|line| {
+        let trimmed = line.trim();
+        trimmed.starts_with('[')
+            && trimmed.ends_with(']')
+            && trimmed[1..trimmed.len() - 1]
+                .trim()
+                .eq_ignore_ascii_case(wanted)
+    })?;
+    let end = lines
+        .iter()
+        .enumerate()
+        .skip(start + 1)
+        .find(|(_, line)| {
+            let trimmed = line.trim();
+            trimmed.starts_with('[') && trimmed.ends_with(']')
+        })
+        .map(|(index, _)| index)
+        .unwrap_or(lines.len());
+    Some((start, end))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -151,5 +215,23 @@ mod tests {
             "Enabled=true".into(),
         ];
         assert!(ensure_value(&mut lines, "FrameGen", "Enabled", "true", &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn check_ignores_unrelated_user_values() {
+        let dir = std::env::temp_dir().join(format!("optinr-ini-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("OptiScaler.ini");
+        fs::write(
+            &path,
+            "[DlssNr]\nEnabled=true\nRunBeforeSR=true\nNrBackend=mochizuki\n\
+             [Plugins]\nLoadAsiPlugins=true\n\
+             [FrameGen]\nExternal=false\nEnabled=true\nFGInput=dlssg\nFGOutput=xefg\n\
+             [XeFG]\nInterpolationCount=1\nHighResMV=true\n",
+        )
+        .unwrap();
+        assert!(check_fixed_profile(&path, true).unwrap().is_empty());
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(&dir).unwrap();
     }
 }

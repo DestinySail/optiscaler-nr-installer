@@ -10,7 +10,7 @@ pub const DEFAULT_RELEASE_REPO: &str = "DestinySail/optiscaler-nr-installer";
 pub const DEFAULT_EXTRAS_VERSION: &str = "extras-v1";
 pub const DEFAULT_EXTRAS_URL: &str = "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/extras-v1/extras-v1.zip";
 pub const DEFAULT_EXTRAS_SHA256: &str =
-    "f3d649477ee83a8281e3f5e7cbc45c25486289c3a0b6b0fa860fa725ad8f99bf";
+    "4f6da6b80688fc4fe18e4df241234aa2020e1414ca2b4060034895505d2e4479";
 
 #[derive(Debug, Clone)]
 pub struct AppPaths {
@@ -195,9 +195,15 @@ pub struct InstallRecord {
     pub extras_version: Option<String>,
     pub profile: String,
     pub proxy_file: String,
+    #[serde(default = "default_true")]
+    pub frame_gen_enabled: bool,
     pub files: Vec<ManagedFile>,
     pub baseline_backup: PathBuf,
     pub previous_snapshot: PathBuf,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone)]

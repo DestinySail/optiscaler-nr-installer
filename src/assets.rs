@@ -202,7 +202,11 @@ fn validate_release(root: &Path) -> Result<(), String> {
 }
 
 fn validate_extras(root: &Path) -> Result<(), String> {
-    for item in ["MFGUnlocker.asi", "dlssnr-amd/dlssnr.bin"] {
+    for item in [
+        "MFGUnlocker.asi",
+        "dlssnr-amd/dlssnr.bin",
+        "dlssnr-amd/dlssnr-int4.bin",
+    ] {
         if !root.join(item).is_file() {
             return Err(format!("固定资源缺少 {item}: {}", root.display()));
         }

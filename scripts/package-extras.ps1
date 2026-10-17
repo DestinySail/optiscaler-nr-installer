@@ -9,7 +9,8 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 $source = (Resolve-Path -LiteralPath $SourceDir).Path
 $required = @(
     (Join-Path $source 'MFGUnlocker.asi'),
-    (Join-Path $source 'dlssnr-amd\dlssnr.bin')
+    (Join-Path $source 'dlssnr-amd\dlssnr.bin'),
+    (Join-Path $source 'dlssnr-amd\dlssnr-int4.bin')
 )
 foreach ($item in $required) {
     if (-not (Test-Path -LiteralPath $item -PathType Leaf)) {
@@ -47,8 +48,8 @@ finally {
 
 $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -LiteralPath (Join-Path $dist "$Version.sha256") -Value "$hash  $Version.zip" -Encoding ascii
-Get-ChildItem -LiteralPath $dist -File |
-    Where-Object { $_.Name -notlike 'SHA256SUMS.txt' } |
+@("$Version.zip", "$Version.sha256") |
+    ForEach-Object { Get-Item -LiteralPath (Join-Path $dist $_) } |
     ForEach-Object {
         $itemHash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         "$itemHash  $($_.Name)"

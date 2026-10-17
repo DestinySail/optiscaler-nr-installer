@@ -177,6 +177,7 @@ pub fn install(
             extras_version: Some(components.extras_version.clone()),
             profile: crate::model::FIXED_PROFILE.to_string(),
             proxy_file: proxy.clone(),
+            frame_gen_enabled: true,
             files: managed,
             baseline_backup: existing_record
                 .as_ref()
@@ -198,9 +199,16 @@ pub fn install(
         })
     })();
 
-    if result.is_err() {
-        let _ = rollback_transaction(&transaction);
-        let _ = fs::remove_file(&transaction_path);
+    if let Err(error) = &result {
+        return match rollback_transaction(&transaction) {
+            Ok(()) => {
+                let _ = fs::remove_file(&transaction_path);
+                result
+            }
+            Err(rollback_error) => Err(format!(
+                "{error}\n自动回滚未完成：{rollback_error}\n事务日志已保留，下次启动会继续恢复。"
+            )),
+        };
     }
     result
 }
@@ -212,6 +220,14 @@ pub fn check_install(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceRep
         let target = record_target(&game.game_dir, &file.relative_path)?;
         if !target.is_file() {
             issues.push(format!("缺失：{}", file.relative_path));
+            continue;
+        }
+        if file.relative_path.eq_ignore_ascii_case("OptiScaler.ini") {
+            issues.extend(
+                ini::check_fixed_profile(&target, record.frame_gen_enabled)?
+                    .into_iter()
+                    .map(|issue| format!("OptiScaler.ini：{issue}")),
+            );
             continue;
         }
         let actual = sha256_file(&target)?;
@@ -316,6 +332,7 @@ pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<Maintenanc
     {
         ini_entry.sha256 = sha256_file(&ini_path)?;
     }
+    record.frame_gen_enabled = false;
     write_json_atomic(
         &paths.games.join(game_id(&game.exe)).join("record.json"),
         &record,
@@ -394,10 +411,21 @@ pub fn recover_transactions(paths: &AppPaths) -> Vec<String> {
         return messages;
     };
     for entry in entries.flatten() {
-        let path = entry.path().join("transaction.json");
+        let state_dir = entry.path();
+        let path = state_dir.join("transaction.json");
         let Ok(transaction) = read_json::<Transaction>(&path) else {
             continue;
         };
+        if read_json::<InstallRecord>(&state_dir.join("record.json"))
+            .is_ok_and(|record| record.installed_at_ms >= transaction.started_at_ms)
+        {
+            let _ = fs::remove_file(&path);
+            messages.push(format!(
+                "上次事务已完成提交，清理日志：{}",
+                transaction.game_dir.display()
+            ));
+            continue;
+        }
         match rollback_transaction(&transaction) {
             Ok(()) => {
                 let _ = fs::remove_file(&path);
@@ -461,6 +489,11 @@ fn build_plan(components: &PreparedComponents, proxy: &str) -> Result<Vec<Planne
         &mut files,
         &components.extras_root.join("dlssnr-amd/dlssnr.bin"),
         "dlssnr-amd/dlssnr.bin",
+    )?;
+    add(
+        &mut files,
+        &components.extras_root.join("dlssnr-amd/dlssnr-int4.bin"),
+        "dlssnr-amd/dlssnr-int4.bin",
     )?;
     let mut by_path = BTreeMap::new();
     for file in files {

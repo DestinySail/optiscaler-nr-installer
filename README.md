@@ -44,7 +44,7 @@ cargo build --release
 
 ## 发布 `extra`
 
-`extra` 约 448 MiB，不能作为普通 Git 文件提交。先在自己的仓库创建 Release `extras-v1`，然后运行：
+固定资源源文件约 523 MiB，压缩包约 348 MiB，不能作为普通 Git 文件提交。先在自己的仓库创建 Release `extras-v1`，然后运行：
 
 ```powershell
 .\scripts\package-extras.ps1 -SourceDir "C:\path\to\payload\extra"
@@ -58,7 +58,7 @@ dist/extras-v1.sha256
 dist/SHA256SUMS.txt
 ```
 
-把 ZIP 和校验文件上传到 `extras-v1` Release。ZIP 根目录保持 `MFGUnlocker.asi`、`dlssnr-amd\dlssnr.bin` 的相对布局。发行前确认模型与二进制的再分发许可，并保留原项目署名。
+把 ZIP 和校验文件上传到 `extras-v1` Release。ZIP 根目录保持 `MFGUnlocker.asi`、`dlssnr-amd\dlssnr.bin`、`dlssnr-amd\dlssnr-int4.bin` 的相对布局。发行前确认模型与二进制的再分发许可，并保留原项目署名。
 
 来源清单见 [release/EXTRAS-NOTICES.md](release/EXTRAS-NOTICES.md)。
 

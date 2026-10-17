@@ -17,20 +17,22 @@
 
 ## 已验证
 
-- `cargo test`：9 项通过，包含 minisign 清单验签、篡改拒绝、单实例锁和 OptiScaler 标记识别。
+- `cargo test`：10 项通过，包含 minisign 清单验签、篡改拒绝、单实例锁和 OptiScaler 标记识别。
 - `cargo clippy --all-targets -- -D warnings`：通过。
 - upstream v1.12.2：实际下载 203.7 MiB 压缩包，解压 990 项成功。
 - 在独立测试目录安装 840 个受管文件，检查通过。
+- 新版 `extras-v1.zip` 安装 841 个文件，`dlssnr-amd/dlssnr-int4.bin` 哈希与上游清单一致。
 - v1.12.2 → v1.12.1 → 回滚 v1.12.2：检查通过。
 - 关闭插帧：MFGUnlocker.asi 移出，`[FrameGen] Enabled=false`。
 - 卸载：840 个受管文件按基线清除，原始 `DummyGame.exe` 保留。
 - 代理冲突：预先放入第三方 `dxgi.dll` 时选择 `winmm.dll`，第三方文件哈希不变，自定义 INI 段保留。
 - 旧安装接管：预先放入已有 OptiScaler `dxgi.dll` 时识别并继续使用 `dxgi.dll`，基线备份哈希一致，卸载后恢复原文件。
 - 检查/修复：篡改 `dlssnr-amd/shaders/accumulation.txt` 后检查报告 1 个问题，修复后检查通过。
+- INI：游戏回写无关键（`HighResMV=true`）后检查仍通过；关闭插帧后检查也按禁用状态通过。
 - 中途失败：锁定 `MFGUnlocker.asi` 令替换失败，已写入的代理、INI、runtime 被回滚，原锁定文件保留，事务日志清除。
 - 发布清单：用临时 minisign 密钥签名 `update-manifest.json`，minisign CLI 验签通过；未提供密钥时脚本会移除旧测试签名。
-- `extras-v1.zip`：317,857,005 字节，SHA-256 `f3d649477ee83a8281e3f5e7cbc45c25486289c3a0b6b0fa860fa725ad8f99bf`。
-- Release EXE：`OptiScalerNR.exe`，SHA-256 `40056129f1700ea1c843812fda080d32a11982a065b476c7a34e230806f7e0a1`。
+- `extras-v1.zip`：365,321,458 字节，SHA-256 `4f6da6b80688fc4fe18e4df241234aa2020e1414ca2b4060034895505d2e4479`，包含已校验的 `dlssnr-int4.bin`。
+- Release EXE：`OptiScalerNR.exe`，SHA-256 `e3acf24333074407a1c3eae61ba58fec3b6a7ab744c153af58db6a1349339e70`。
 
 测试没有修改真实鸣潮目录，也没有启动游戏。
 
