@@ -1,126 +1,93 @@
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::Deserialize;
+use crate::model::{AppPaths, Progress, Settings, UpstreamRelease};
+use crate::util::{safe_relative, sha256_file};
 
-use crate::model::{
-    AppPaths, Progress, UPSTREAM_REPO, UpstreamAsset, UpstreamCheckCache, UpstreamRelease,
-};
-use crate::util::{now_ms, read_json, safe_relative, sha256_file, write_json_atomic};
-
-#[derive(Debug, Deserialize)]
-struct GitHubRelease {
-    id: u64,
-    tag_name: String,
-    published_at: Option<String>,
-    prerelease: bool,
-    draft: bool,
-    assets: Vec<GitHubAsset>,
+pub fn check_upstream(paths: &AppPaths, settings: &Settings) -> Result<UpstreamRelease, String> {
+    Ok(crate::catalog::check(paths, settings, false)?.upstream)
 }
 
-#[derive(Debug, Deserialize)]
-struct GitHubAsset {
-    id: u64,
-    name: String,
-    size: u64,
-    digest: Option<String>,
-    updated_at: String,
-    browser_download_url: String,
+pub fn load_cached_upstream(paths: &AppPaths, settings: &Settings) -> Option<UpstreamRelease> {
+    crate::catalog::cached(paths, settings).map(|catalog| catalog.upstream)
 }
 
-pub fn check_upstream(paths: &AppPaths) -> Result<UpstreamRelease, String> {
-    let cached = read_json::<UpstreamCheckCache>(&paths.upstream_check).ok();
-    let client = http_client()?;
-    let mut request = client
-        .get(format!(
-            "https://api.github.com/repos/{UPSTREAM_REPO}/releases/latest"
-        ))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "OptiScalerNR-Installer");
-    if let Some(etag) = cached.as_ref().and_then(|cache| cache.etag.as_deref()) {
-        request = request.header("If-None-Match", etag);
+pub fn upstream_archive(paths: &AppPaths, release: &UpstreamRelease) -> PathBuf {
+    paths
+        .cache
+        .join("upstream")
+        .join(release.asset.id.to_string())
+        .join(&release.asset.name)
+}
+
+pub fn download_upstream(
+    paths: &AppPaths,
+    release: &UpstreamRelease,
+    mut progress: impl FnMut(Progress),
+) -> Result<PathBuf, String> {
+    let name = safe_relative(Path::new(&release.asset.name))?;
+    if name.components().count() != 1
+        || !release.asset.name.starts_with("OptScaler-NR-")
+        || !release.asset.name.to_ascii_lowercase().ends_with(".zip")
+    {
+        return Err("上游主包缓存名称无效，拒绝下载和清理".into());
     }
-    let response = request
-        .send()
-        .map_err(|e| format!("检查上游发布失败: {e}"))?;
-    if response.status() == reqwest::StatusCode::NOT_MODIFIED {
-        return cached
-            .map(|cache| cache.latest)
-            .ok_or_else(|| "上游返回 304，但没有可用缓存".to_string());
-    }
-    if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().unwrap_or_default();
-        return Err(format!(
-            "检查上游发布失败: HTTP {status}{}",
-            if body.is_empty() {
-                String::new()
-            } else {
-                format!(" - {}", body.chars().take(200).collect::<String>())
-            }
-        ));
-    }
-    let etag = response
-        .headers()
-        .get(reqwest::header::ETAG)
-        .and_then(|value| value.to_str().ok())
-        .map(ToOwned::to_owned);
-    let release = response
-        .json::<GitHubRelease>()
-        .map_err(|e| format!("解析上游发布失败: {e}"))?;
-    if release.prerelease || release.draft {
-        return Err("GitHub latest 返回了预发布或草稿版本，拒绝自动使用".to_string());
-    }
-    let asset = release
-        .assets
-        .into_iter()
-        .filter(|asset| {
-            asset.name.starts_with("OptScaler-NR-")
-                && asset.name.to_ascii_lowercase().ends_with(".zip")
-        })
-        .max_by_key(|asset| asset.id)
-        .ok_or_else(|| "上游最新发布没有 OptScaler-NR-*.zip".to_string())?;
-    let safe_name = safe_relative(std::path::Path::new(&asset.name))?;
-    if safe_name.components().count() != 1 {
-        return Err("上游资产名称不是单个文件名，拒绝使用".to_string());
-    }
-    let sha256 = asset
-        .digest
-        .as_deref()
-        .and_then(|digest| digest.strip_prefix("sha256:"))
-        .ok_or_else(|| "上游资产没有 GitHub SHA-256 digest，拒绝安装".to_string())?
-        .to_ascii_lowercase();
-    let latest = UpstreamRelease {
-        release_id: release.id,
-        tag: release.tag_name,
-        published_at: release.published_at.unwrap_or_default(),
-        asset: UpstreamAsset {
-            id: asset.id,
-            name: safe_name.to_string_lossy().to_string(),
-            size: asset.size,
-            sha256,
-            url: asset.browser_download_url,
-            updated_at: asset.updated_at,
-        },
-        checked_at_ms: now_ms(),
-    };
-    write_json_atomic(
-        &paths.upstream_check,
-        &UpstreamCheckCache {
-            latest: latest.clone(),
-            etag,
-        },
+    let destination = upstream_archive(paths, release);
+    download_verified(
+        &release.asset.url,
+        &destination,
+        &release.asset.sha256,
+        Some(release.asset.size),
+        "下载主组件",
+        &mut progress,
     )?;
-    Ok(latest)
+    prune_upstream_cache(paths, release.asset.id)
+        .map_err(|error| format!("新版主包已校验，但旧缓存清理失败：{error}"))?;
+    Ok(destination)
 }
 
-pub fn load_cached_upstream(paths: &AppPaths) -> Option<UpstreamRelease> {
-    read_json::<UpstreamCheckCache>(&paths.upstream_check)
-        .ok()
-        .map(|cache| cache.latest)
+fn prune_upstream_cache(paths: &AppPaths, keep_id: u64) -> Result<(), String> {
+    let cache = paths
+        .cache
+        .canonicalize()
+        .map_err(|e| format!("读取缓存目录失败：{e}"))?;
+    let data_root = paths
+        .root
+        .canonicalize()
+        .map_err(|e| format!("读取数据目录失败：{e}"))?;
+    if cache != data_root.join("cache") {
+        return Err("缓存目录存在重定向，拒绝自动清理".into());
+    }
+    let root = paths
+        .cache
+        .join("upstream")
+        .canonicalize()
+        .map_err(|e| format!("读取主包缓存目录失败：{e}"))?;
+    let keep = root.join(keep_id.to_string());
+    if root != cache.join("upstream") || keep.canonicalize().ok().as_ref() != Some(&keep) {
+        return Err("主包缓存目录存在重定向，拒绝自动清理".into());
+    }
+    // Only generated asset-ID directories belong to the upstream package cache.
+    for entry in fs::read_dir(&root).map_err(|e| format!("读取主包缓存失败：{e}"))? {
+        let entry = entry.map_err(|e| format!("读取主包缓存项失败：{e}"))?;
+        let name = entry.file_name();
+        let managed_id = name
+            .to_str()
+            .and_then(|name| name.parse::<u64>().ok())
+            .is_some_and(|id| name == id.to_string().as_str());
+        if managed_id
+            && entry.path() != keep
+            && entry
+                .file_type()
+                .map_err(|e| format!("检查主包缓存项失败：{e}"))?
+                .is_dir()
+        {
+            crate::util::remove_tree_safely(&entry.path())?;
+        }
+    }
+    Ok(())
 }
 
 pub fn download_verified(
@@ -259,4 +226,208 @@ pub fn http_client() -> Result<reqwest::blocking::Client, String> {
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::now_ms;
+    use std::io::BufRead;
+    use std::net::TcpListener;
+
+    fn serve(response: String) -> (String, std::thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/releases/latest", listener.local_addr().unwrap());
+        let worker = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = String::new();
+            for line in std::io::BufReader::new(&stream).lines() {
+                let line = line.unwrap();
+                if line.is_empty() {
+                    break;
+                }
+                request.push_str(&line);
+                request.push('\n');
+            }
+            stream.write_all(response.as_bytes()).unwrap();
+            request
+        });
+        (url, worker)
+    }
+
+    #[test]
+    fn upstream_checks_downloads_and_safe_cache_retention() {
+        let root = std::env::temp_dir().join(format!(
+            "optinr-update-test-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        fs::create_dir(&root).unwrap();
+        let paths = AppPaths {
+            cache: root.join("cache"),
+            staging: root.join("staging"),
+            legacy_backups: root.join("backups"),
+            games: root.join("games"),
+            updates: root.join("updates"),
+            settings: root.join("settings.json"),
+            root: root.clone(),
+        };
+        let value: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/fixtures/update-catalog.json")).unwrap();
+        let latest: UpstreamRelease = serde_json::from_value(value["upstream"].clone()).unwrap();
+        let body = "verified upstream package";
+        let (url, worker) = serve(format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        ));
+        let mut release = latest;
+        release.asset.url = url;
+        release.asset.size = body.len() as u64;
+        release.asset.sha256 = {
+            use sha2::Digest;
+            crate::util::hex_lower(&sha2::Sha256::digest(body.as_bytes()))
+        };
+        let old_dir = paths.cache.join("upstream/1");
+        fs::create_dir_all(&old_dir).unwrap();
+        fs::write(
+            old_dir.join("OptScaler-NR-old.zip"),
+            b"old verified package",
+        )
+        .unwrap();
+        fs::write(
+            old_dir.join("OptScaler-NR-old.part"),
+            b"old partial download",
+        )
+        .unwrap();
+        let untouched = [
+            paths.cache.join("extras/keep.zip"),
+            paths.cache.join("upstream/manual/keep.zip"),
+            paths.cache.join("upstream/1234"),
+            paths.games.join("game/keep.dll"),
+        ];
+        for path in &untouched {
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, b"untouched").unwrap();
+        }
+        let destination = upstream_archive(&paths, &release);
+        let mut failed_release = release.clone();
+        failed_release.asset.url = "http://127.0.0.1:0/unavailable".into();
+        assert!(download_upstream(&paths, &failed_release, |_| {}).is_err());
+        assert_eq!(
+            fs::read(old_dir.join("OptScaler-NR-old.zip")).unwrap(),
+            b"old verified package"
+        );
+        assert!(!destination.exists());
+        failed_release.asset.name = "../outside.zip".into();
+        assert!(download_upstream(&paths, &failed_release, |_| {}).is_err());
+        assert!(old_dir.exists());
+        let bad_body = "x".repeat(body.len());
+        let (bad_url, bad_worker) = serve(format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{bad_body}",
+            bad_body.len()
+        ));
+        assert!(
+            download_attempt(
+                &bad_url,
+                &destination.with_extension("part"),
+                &release.asset.sha256,
+                Some(release.asset.size),
+                "下载主组件",
+                &mut |_| {}
+            )
+            .unwrap_err()
+            .contains("SHA-256 不匹配")
+        );
+        bad_worker.join().unwrap();
+        assert!(old_dir.join("OptScaler-NR-old.zip").is_file());
+        assert!(!destination.exists());
+        assert_eq!(
+            download_upstream(&paths, &release, |_| {}).unwrap(),
+            destination
+        );
+        worker.join().unwrap();
+        assert_eq!(fs::read(&destination).unwrap(), body.as_bytes());
+        assert!(!old_dir.exists());
+        fs::create_dir(&old_dir).unwrap();
+        let old_file = old_dir.join("OptScaler-NR-old.zip");
+        fs::write(&old_file, b"old verified package").unwrap();
+        release.asset.url = "http://127.0.0.1:0/not-requested".into();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            let locked = OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(&old_file)
+                .unwrap();
+            assert!(
+                download_upstream(&paths, &release, |_| {})
+                    .unwrap_err()
+                    .contains("新版主包已校验，但旧缓存清理失败")
+            );
+            assert_eq!(fs::read(&destination).unwrap(), body.as_bytes());
+            drop(locked);
+            assert_eq!(fs::read(&old_file).unwrap(), b"old verified package");
+        }
+        download_upstream(&paths, &release, |_| {}).unwrap();
+        assert!(!old_dir.exists());
+        assert_eq!(fs::read(&destination).unwrap(), body.as_bytes());
+        for path in &untouched {
+            assert_eq!(fs::read(path).unwrap(), b"untouched");
+        }
+        #[cfg(windows)]
+        {
+            let junction = |link: &Path, target: &Path| {
+                let output = std::process::Command::new("cmd")
+                    .args(["/d", "/c", "mklink", "/J"])
+                    .arg(link.to_string_lossy().replace('/', "\\"))
+                    .arg(target.to_string_lossy().replace('/', "\\"))
+                    .output()
+                    .unwrap();
+                assert!(
+                    output.status.success(),
+                    "{}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            };
+            fs::create_dir(&old_dir).unwrap();
+            junction(&old_dir.join("external-game"), &paths.games.join("game"));
+            download_upstream(&paths, &release, |_| {}).unwrap();
+            assert!(!old_dir.exists());
+            assert_eq!(
+                fs::read(paths.games.join("game/keep.dll")).unwrap(),
+                b"untouched"
+            );
+            let upstream_root = paths.cache.join("upstream");
+            let redirected = root.join("redirected");
+            fs::rename(&upstream_root, &redirected).unwrap();
+            junction(&upstream_root, &redirected);
+            assert!(
+                prune_upstream_cache(&paths, release.asset.id)
+                    .unwrap_err()
+                    .contains("重定向")
+            );
+            assert_eq!(
+                fs::read(redirected.join("2").join(&release.asset.name)).unwrap(),
+                body.as_bytes()
+            );
+            crate::util::remove_tree_safely(&upstream_root).unwrap();
+            assert!(redirected.join("manual/keep.zip").is_file());
+            fs::rename(&redirected, &upstream_root).unwrap();
+            let redirected_cache = root.join("redirected-cache");
+            fs::rename(&paths.cache, &redirected_cache).unwrap();
+            junction(&paths.cache, &redirected_cache);
+            assert!(
+                prune_upstream_cache(&paths, release.asset.id)
+                    .unwrap_err()
+                    .contains("重定向")
+            );
+            crate::util::remove_tree_safely(&paths.cache).unwrap();
+            assert!(redirected_cache.join("upstream/manual/keep.zip").is_file());
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 }

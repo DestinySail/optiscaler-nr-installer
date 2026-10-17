@@ -2,6 +2,7 @@
 
 mod archive;
 mod assets;
+mod catalog;
 mod games;
 mod gpu;
 mod ini;
@@ -77,9 +78,13 @@ fn run() -> Result<(), String> {
     let paths = model::AppPaths::discover();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_inner_size([900.0, 600.0])
-            .with_min_inner_size([680.0, 480.0])
-            .with_position([80.0, 80.0]),
+            .with_inner_size([1180.0, 760.0])
+            .with_min_inner_size([900.0, 650.0])
+            .with_icon(eframe::egui::IconData {
+                rgba: include_bytes!("icon.rgba").to_vec(),
+                width: 64,
+                height: 64,
+            }),
         ..Default::default()
     };
     eframe::run_native(
@@ -119,15 +124,15 @@ fn diagnose() -> Result<(), String> {
     if let Some(path) = games::default_picker_directory() {
         println!("PICKER: {}", path.display());
     }
-    match updates::check_upstream(&paths) {
+    let settings = util::read_json::<model::Settings>(&paths.settings).unwrap_or_default();
+    match updates::check_upstream(&paths, &settings) {
         Ok(release) => println!(
             "UPSTREAM: {} | {} | {} bytes",
             release.tag, release.asset.name, release.asset.size
         ),
         Err(error) => println!("UPSTREAM ERROR: {error}"),
     }
-    let settings = util::read_json::<model::Settings>(&paths.settings).unwrap_or_default();
-    match self_update::check(&settings) {
+    match self_update::check(&paths, &settings) {
         Ok(Some(update)) => println!("APP UPDATE: {}", update.version),
         Ok(None) => println!("APP UPDATE: none"),
         Err(error) => println!("APP UPDATE: {error}"),
@@ -151,7 +156,7 @@ fn headless_install(exe: std::path::PathBuf, args: &[String]) -> Result<(), Stri
         ));
     }
     let game = games::inspect_manual(exe)?;
-    let upstream = updates::check_upstream(&paths).ok();
+    let upstream = updates::check_upstream(&paths, &settings).ok();
     let mut last_stage = String::new();
     let components = assets::prepare(&paths, &settings, upstream, |progress| {
         if progress.stage != last_stage {
@@ -197,7 +202,7 @@ fn headless_maintenance(
                         .ok_or_else(|| "--extras 后需要 ZIP 路径".to_string())?,
                 ));
             }
-            let upstream = updates::check_upstream(&paths).ok();
+            let upstream = updates::check_upstream(&paths, &settings).ok();
             let components = assets::prepare(&paths, &settings, upstream, |_| {})?;
             let report = install::install(&paths, &game, &components, |_| {})?;
             let _ = install::clear_staging(&paths);

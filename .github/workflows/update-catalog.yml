@@ -1,0 +1,74 @@
+name: update-catalog
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-catalog
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'DestinySail/optiscaler-nr-installer'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+      - name: Restore published feed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/update-feed
+          if gh api "repos/$GITHUB_REPOSITORY/branches/update-feed" > /dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/contents/update-catalog.json?ref=update-feed" --jq .content | base64 -d > dist/update-feed/update-catalog.json
+            gh api "repos/$GITHUB_REPOSITORY/contents/update-catalog.json.minisig?ref=update-feed" --jq .content | base64 -d > dist/update-feed/update-catalog.json.minisig
+          fi
+      - name: Generate and verify signed catalog
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NR_CATALOG_SIGNING_KEY: ${{ secrets.NR_CATALOG_SIGNING_KEY }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:NR_CATALOG_SIGNING_KEY) { throw 'NR_CATALOG_SIGNING_KEY secret is missing' }
+          $keyPath = Join-Path $env:RUNNER_TEMP 'catalog-signing.key'
+          try {
+            [IO.File]::WriteAllText($keyPath, $env:NR_CATALOG_SIGNING_KEY)
+            chmod 600 $keyPath
+            Remove-Item Env:NR_CATALOG_SIGNING_KEY
+            ./scripts/publish-catalog.ps1 -Repo $env:GITHUB_REPOSITORY -MinisignKey $keyPath
+          } finally {
+            Remove-Item -LiteralPath $keyPath -Force -ErrorAction SilentlyContinue
+          }
+      - name: Publish both files atomically
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          feed=$(mktemp -d)
+          git -C "$feed" init -b update-feed
+          git -C "$feed" remote add origin "https://github.com/$GITHUB_REPOSITORY.git"
+          if gh api "repos/$GITHUB_REPOSITORY/branches/update-feed" > /dev/null 2>&1; then
+            git -C "$feed" fetch origin update-feed
+            git -C "$feed" switch -C update-feed FETCH_HEAD
+          fi
+          cp dist/update-feed/update-catalog.json dist/update-feed/update-catalog.json.minisig "$feed/"
+          git -C "$feed" add update-catalog.json update-catalog.json.minisig
+          if ! git -C "$feed" diff --cached --quiet; then
+            git -C "$feed" -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Update signed catalog'
+            gh auth setup-git
+            git -C "$feed" push origin HEAD:refs/heads/update-feed
+          fi

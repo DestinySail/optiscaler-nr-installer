@@ -1,2 +1,4 @@
 tests/fixtures/update-manifest.json text eol=lf
 tests/fixtures/update-manifest.json.minisig text eol=lf
+tests/fixtures/update-catalog.json text eol=lf
+tests/fixtures/update-catalog.json.minisig text eol=lf

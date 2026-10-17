@@ -23,10 +23,12 @@ pub fn prepare(
     let upstream = if settings.local_upstream_source.is_some() {
         None
     } else {
-        Some(match upstream.or_else(|| load_cached_upstream(paths)) {
-            Some(release) => release,
-            None => check_upstream(paths)?,
-        })
+        Some(
+            match upstream.or_else(|| load_cached_upstream(paths, settings)) {
+                Some(release) => release,
+                None => check_upstream(paths, settings)?,
+            },
+        )
     };
     let (release_input, upstream_tag, release_key) =
         if let Some(source) = settings.local_upstream_source.as_deref() {
@@ -45,11 +47,6 @@ pub fn prepare(
             let upstream = upstream
                 .as_ref()
                 .ok_or_else(|| "缺少上游发布信息".to_string())?;
-            let destination = paths
-                .cache
-                .join("upstream")
-                .join(upstream.asset.id.to_string())
-                .join(&upstream.asset.name);
             progress(Progress::new(
                 "准备组件",
                 format!(
@@ -59,14 +56,7 @@ pub fn prepare(
                 ),
                 Some(0.0),
             ));
-            download_verified(
-                &upstream.asset.url,
-                &destination,
-                &upstream.asset.sha256,
-                Some(upstream.asset.size),
-                "下载主组件",
-                &mut progress,
-            )?;
+            let destination = crate::updates::download_upstream(paths, upstream, &mut progress)?;
             (
                 destination,
                 upstream.tag.clone(),

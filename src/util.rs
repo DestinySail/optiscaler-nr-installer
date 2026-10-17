@@ -183,7 +183,15 @@ pub fn remove_tree_safely(path: &Path) -> Result<(), String> {
     let metadata =
         fs::symlink_metadata(path).map_err(|e| format!("检查 {} 失败: {e}", path.display()))?;
     if is_reparse(&metadata) {
-        return if metadata.is_dir() {
+        #[cfg(windows)]
+        let directory = {
+            use std::os::windows::fs::MetadataExt;
+            // symlink_metadata().is_dir() is false for Windows directory junctions.
+            metadata.file_attributes() & 0x10 != 0
+        };
+        #[cfg(not(windows))]
+        let directory = metadata.is_dir();
+        return if directory {
             fs::remove_dir(path)
         } else {
             fs::remove_file(path)

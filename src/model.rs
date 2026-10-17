@@ -21,7 +21,6 @@ pub struct AppPaths {
     pub games: PathBuf,
     pub updates: PathBuf,
     pub settings: PathBuf,
-    pub upstream_check: PathBuf,
 }
 
 impl AppPaths {
@@ -37,16 +36,9 @@ impl AppPaths {
             games: root.join("games"),
             updates: root.join("updates"),
             settings: root.join("settings.json"),
-            upstream_check: root.join("catalog").join("upstream.json"),
             root,
         };
-        for dir in [
-            &paths.cache,
-            &paths.staging,
-            &paths.games,
-            &paths.updates,
-            paths.upstream_check.parent().expect("catalog has a parent"),
-        ] {
+        for dir in [&paths.cache, &paths.staging, &paths.games, &paths.updates] {
             std::fs::create_dir_all(dir)
                 .map_err(|e| format!("创建 {} 失败: {e}", dir.display()))?;
         }
@@ -117,12 +109,6 @@ pub struct UpstreamRelease {
     pub published_at: String,
     pub asset: UpstreamAsset,
     pub checked_at_ms: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UpstreamCheckCache {
-    pub latest: UpstreamRelease,
-    pub etag: Option<String>,
 }
 
 #[derive(Debug, Clone)]

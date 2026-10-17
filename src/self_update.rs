@@ -1,12 +1,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-use minisign_verify::{PublicKey, Signature};
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{APP_VERSION, AppPaths, Settings};
-use crate::updates::{download_verified, http_client};
+use crate::updates::download_verified;
 use crate::util::{sha256_file, write_json_atomic};
 
 #[derive(Debug, Clone)]
@@ -17,8 +16,8 @@ pub struct AppUpdateInfo {
     pub notes: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-struct UpdateManifest {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateManifest {
     schema: u32,
     version: String,
     platform: String,
@@ -28,74 +27,28 @@ struct UpdateManifest {
     notes: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct Release {
-    tag_name: String,
-    prerelease: bool,
-    draft: bool,
-    assets: Vec<ReleaseAsset>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ReleaseAsset {
-    name: String,
-    browser_download_url: String,
-}
-
-pub fn check(settings: &Settings) -> Result<Option<AppUpdateInfo>, String> {
-    let repo = settings.release_repo.trim();
-    if repo.is_empty() {
+pub fn check(paths: &AppPaths, settings: &Settings) -> Result<Option<AppUpdateInfo>, String> {
+    if settings.release_repo.trim().is_empty() {
         return Ok(None);
     }
-    let client = http_client()?;
-    let releases = client
-        .get(format!(
-            "https://api.github.com/repos/{repo}/releases?per_page=30"
-        ))
-        .header("Accept", "application/vnd.github+json")
-        .header("X-GitHub-Api-Version", "2022-11-28")
-        .header("User-Agent", "OptiScalerNR-Installer")
-        .send()
-        .and_then(|response| response.error_for_status())
-        .map_err(|e| format!("检查程序更新失败: {e}"))?
-        .json::<Vec<Release>>()
-        .map_err(|e| format!("解析程序更新列表失败: {e}"))?;
-    let current = Version::parse(APP_VERSION).map_err(|e| format!("当前程序版本无效: {e}"))?;
-    let newest = releases
-        .into_iter()
-        .filter(|release| !release.prerelease && !release.draft)
-        .filter_map(|release| {
-            let version = release.tag_name.strip_prefix("app-v")?;
-            let parsed = Version::parse(version).ok()?;
-            (parsed > current).then_some((parsed, release))
-        })
-        .max_by(|a, b| a.0.cmp(&b.0));
-    let Some((version, release)) = newest else {
-        return Ok(None);
-    };
-    let public_key = option_env!("NR_UPDATE_PUBKEY")
-        .filter(|key| !key.trim().is_empty())
-        .ok_or_else(|| {
-            "发现程序新版本，但此构建没有内置更新公钥；发布构建需设置 NR_UPDATE_PUBKEY".to_string()
-        })?;
-    let manifest_asset = find_asset(&release.assets, "update-manifest.json")?;
-    let signature_asset = find_asset(&release.assets, "update-manifest.json.minisig")?;
-    let manifest_bytes = fetch_small(&client, &manifest_asset.browser_download_url, 64 * 1024)?;
-    let signature_text = String::from_utf8(fetch_small(
-        &client,
-        &signature_asset.browser_download_url,
-        16 * 1024,
-    )?)
-    .map_err(|e| format!("更新签名不是 UTF-8: {e}"))?;
-    verify_manifest(
-        repo,
-        &manifest_bytes,
-        &signature_text,
-        public_key,
-        &version.to_string(),
-    )
+    available(&crate::catalog::check(paths, settings, false)?.installer)
 }
 
+pub fn available(manifest: &UpdateManifest) -> Result<Option<AppUpdateInfo>, String> {
+    let current = Version::parse(APP_VERSION).map_err(|e| format!("当前程序版本无效: {e}"))?;
+    let version = Version::parse(&manifest.version).map_err(|e| format!("更新版本无效: {e}"))?;
+    if version <= current {
+        return Ok(None);
+    }
+    Ok(Some(AppUpdateInfo {
+        version: manifest.version.clone(),
+        exe_url: manifest.exe_url.clone(),
+        sha256: manifest.sha256.clone(),
+        notes: manifest.notes.clone(),
+    }))
+}
+
+#[cfg(test)]
 fn verify_manifest(
     repo: &str,
     manifest_bytes: &[u8],
@@ -103,6 +56,7 @@ fn verify_manifest(
     public_key: &str,
     expected_version: &str,
 ) -> Result<Option<AppUpdateInfo>, String> {
+    use minisign_verify::{PublicKey, Signature};
     let signature =
         Signature::decode(signature_text).map_err(|e| format!("更新签名格式无效: {e}"))?;
     let key = PublicKey::from_base64(public_key).map_err(|e| format!("内置更新公钥无效: {e}"))?;
@@ -110,11 +64,17 @@ fn verify_manifest(
         .map_err(|e| format!("更新清单验签失败: {e}"))?;
     let manifest = serde_json::from_slice::<UpdateManifest>(manifest_bytes)
         .map_err(|e| format!("更新清单 JSON 无效: {e}"))?;
-    if manifest.schema != 1 || manifest.platform != "windows-x64" {
-        return Err("更新清单平台或格式不受支持".to_string());
-    }
     if manifest.version != expected_version {
         return Err("更新清单版本与 Release tag 不一致".to_string());
+    }
+    validate_manifest(repo, &manifest)?;
+    available(&manifest)
+}
+
+pub fn validate_manifest(repo: &str, manifest: &UpdateManifest) -> Result<(), String> {
+    let version = Version::parse(&manifest.version).map_err(|_| "更新清单版本无效")?;
+    if manifest.schema != 1 || manifest.platform != "windows-x64" || !version.pre.is_empty() {
+        return Err("更新清单平台、版本或格式不受支持".to_string());
     }
     if manifest.sha256.len() != 64 || !manifest.sha256.chars().all(|c| c.is_ascii_hexdigit()) {
         return Err("更新清单 SHA-256 无效".to_string());
@@ -123,12 +83,7 @@ fn verify_manifest(
     if !manifest.exe_url.starts_with(&allowed_prefix) {
         return Err("更新清单下载地址不属于配置的发布仓库".to_string());
     }
-    Ok(Some(AppUpdateInfo {
-        version: manifest.version,
-        exe_url: manifest.exe_url,
-        sha256: manifest.sha256,
-        notes: manifest.notes,
-    }))
+    Ok(())
 }
 
 pub fn apply(paths: &AppPaths, update: &AppUpdateInfo) -> Result<PathBuf, String> {
@@ -157,31 +112,6 @@ pub fn apply(paths: &AppPaths, update: &AppUpdateInfo) -> Result<PathBuf, String
     }
     self_replace::self_replace(&downloaded).map_err(|e| format!("替换当前 EXE 失败: {e}"))?;
     Ok(backup)
-}
-
-fn find_asset<'a>(assets: &'a [ReleaseAsset], name: &str) -> Result<&'a ReleaseAsset, String> {
-    assets
-        .iter()
-        .find(|asset| asset.name == name)
-        .ok_or_else(|| format!("程序 Release 缺少 {name}"))
-}
-
-fn fetch_small(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    limit: usize,
-) -> Result<Vec<u8>, String> {
-    let bytes = client
-        .get(url)
-        .header("User-Agent", "OptiScalerNR-Installer")
-        .send()
-        .and_then(|response| response.error_for_status())
-        .and_then(|response| response.bytes())
-        .map_err(|e| format!("下载更新清单失败: {e}"))?;
-    if bytes.len() > limit {
-        return Err(format!("更新清单超过 {limit} 字节限制"));
-    }
-    Ok(bytes.to_vec())
 }
 
 #[cfg(test)]

@@ -811,7 +811,6 @@ mod tests {
             games,
             updates: root.join("updates"),
             settings: root.join("settings.json"),
-            upstream_check: root.join("catalog").join("upstream.json"),
             root: root.clone(),
         };
 
@@ -837,7 +836,6 @@ mod tests {
             games: root.join("games"),
             updates: root.join("updates"),
             settings: root.join("settings.json"),
-            upstream_check: root.join("catalog").join("upstream.json"),
             root: root.clone(),
         };
 

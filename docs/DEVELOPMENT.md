@@ -32,7 +32,8 @@ cargo build --release --locked
 |---|---|
 | `src/gpu.rs` | DXGI 显卡发现与 RDNA4 识别 |
 | `src/games.rs` | Steam、Epic、Windows 卸载记录和手动游戏发现 |
-| `src/updates.rs` | TheAutomatic Release 查询与下载 |
+| `src/catalog.rs` | 静态更新清单验签、缓存与失败退避 |
+| `src/updates.rs` | 主包元数据读取与校验下载 |
 | `src/assets.rs` | 主包/固定资源缓存、解压与兼容性检查 |
 | `src/install.rs` | 文件计划、旧注入清理、事务、维护操作 |
 | `src/ini.rs` | 固定方案配置合并与只读检查 |
@@ -122,4 +123,24 @@ dist/app-v0.2.0.sha256
 
 ## CI
 
-`.github/workflows/build.yml` 执行测试、Clippy 检查和 Release 构建。构建使用仓库变量中的公钥，因此正式渠道的 CI 产物也支持签名更新。
+`.github/workflows/build.yml` 执行测试和 Release 构建。构建使用仓库变量中的公钥，因此正式渠道的 CI 产物也支持签名更新。
+
+## 静态更新清单
+
+客户端只读取配置发布仓库 `update-feed` 分支上的 `update-catalog.json` 和 `.minisig`，不再调用 GitHub Releases API。清单复用已有安装器签名清单字段，并独立记录 TheAutomatic 主包版本、原始下载地址、大小和 SHA-256；固定资源仍按现有独立版本管理。
+
+自动检查命中本地缓存的有效期为 1 小时，手动检查绕过该有效期；网络或签名失败后冷却 5 分钟，包括手动检查。旧清单在每次使用前重新验签，失败刷新不会覆盖已验证内容；界面会明确说明正在使用非实时缓存。缓存仅保存一份清单，不积累历史副本。主包下载仍校验 SHA-256/大小，并只在新版校验成功后清理旧主包缓存；模型兼容性检查保持不变。
+
+维护端脚本 [`scripts/publish-catalog.ps1`](../scripts/publish-catalog.ps1) 查询 GitHub 元数据，先验证最新稳定安装器清单的原始签名，再读取唯一上游主包的 GitHub SHA-256 digest，生成并签署聚合清单。发现新版本不等于完成游戏兼容性验证。
+
+```powershell
+.\scripts\publish-catalog.ps1 `
+  -MinisignKey "C:\path\to\release.key" `
+  -MinisignExe "C:\path\to\minisign.exe"
+```
+
+工作流 [`update-catalog.yml`](../.github/workflows/update-catalog.yml) 每 30 分钟、发布 Release 后或手动触发时运行。配置仓库 Secret `NR_CATALOG_SIGNING_KEY` 为本项目专用 minisign 私钥全文（非密码保护的 CI 专用密钥；必须与 `release/update-key.pub` 匹配）。工作流只在原仓库运行、不由 PR 触发，签名完成后删除临时密钥，两个清单文件以一个提交发布；生成或验签失败不会推送。元数据未变化时不产生提交。
+
+Secret 不对访客公开，但拥有工作流修改权限的人或被攻破的工作流可能使用/窃取它。这把密钥同时具备签发安装器更新的权限，必须保护 GitHub 账号、限制仓库写权限，不能向 PR/不可信脚本暴露 Secret；疑似泄露时删除 Secret、轮换签名密钥并发布带新公钥的安装器。CI 凭证与私钥均不得提交到仓库。若不接受云端保存密钥，可关闭该工作流并在本地签署、发布清单。
+
+定时 Actions 可能延迟，Raw CDN 也可能短暂缓存旧文件或网络失败；这避免的是客户端匿名 Releases API 配额，不保证网络永远可用。发布新版安装器后应手动运行工作流并检查静态清单，确认 `installer.version` 指向新版本。
