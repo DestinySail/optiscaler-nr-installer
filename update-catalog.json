@@ -2,11 +2,11 @@
   "schema": 1,
   "installer": {
     "schema": 1,
-    "version": "0.1.4",
+    "version": "0.1.5",
     "platform": "windows-x64",
-    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.1.4/OptiScalerNR.exe",
-    "sha256": "62648ffcf43942837938b2e8c9f50b5be7fc2259d4eedee2622c8d83fec84e75",
-    "notes": "OptiScaler NR Installer 0.1.4"
+    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.1.5/OptiScalerNR.exe",
+    "sha256": "0f7082feb2425a6b18ad8477a4ac28bb60baac8d05f1c8a0692c42db2fa88acc",
+    "notes": "OptiScaler NR Installer 0.1.5"
   },
   "upstream": {
     "release_id": 415083241,
