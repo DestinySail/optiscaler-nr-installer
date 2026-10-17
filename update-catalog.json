@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "installer": {
+    "schema": 1,
+    "version": "0.1.4",
+    "platform": "windows-x64",
+    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.1.4/OptiScalerNR.exe",
+    "sha256": "62648ffcf43942837938b2e8c9f50b5be7fc2259d4eedee2622c8d83fec84e75",
+    "notes": "OptiScaler NR Installer 0.1.4"
+  },
+  "upstream": {
+    "release_id": 415083241,
+    "tag": "v1.12.2",
+    "published_at": "2026-10-16T14:59:17Z",
+    "asset": {
+      "id": 647670133,
+      "name": "OptScaler-NR-1.12.2.zip",
+      "size": 213639441,
+      "sha256": "779b9b5f4d5756f663798e796c2974d09f05077bde9df1ff5ace31e087ce4dfe",
+      "url": "https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/v1.12.2/OptScaler-NR-1.12.2.zip",
+      "updated_at": "2026-10-16T14:59:27Z"
+    },
+    "checked_at_ms": 0
+  }
+}
