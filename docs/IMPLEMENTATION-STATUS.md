@@ -20,6 +20,7 @@
   - [仓库](https://github.com/DestinySail/optiscaler-nr-installer)
   - [app-v0.1.0](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.0)
   - [app-v0.1.1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.1)
+  - [app-v0.1.2](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.2)
   - [extras-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-v1)
   - [extras-maintenance-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-maintenance-v1)
 
@@ -46,6 +47,7 @@
 - 必装 `extras-v1.zip`：152,492,907 字节，SHA-256 `ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533`，包含已校验的 `dlssnr-int4.bin` 和来源说明。
 - 维护 `extras-maintenance-v1.zip`：212,830,627 字节，SHA-256 `0e36bfaf53ec4e4c74d463583714be8570a3abe49475c4b28f12b1104f169de2`，安装器不下载。
 - Release EXE 0.1.1：SHA-256 `710700ab563770603781f50d4e991c9dd0903c82deaf3f6920ee0c985429edd5`，内置更新公钥 `A97B5A26BCAA69D9`。
+- Release EXE 0.1.2：SHA-256 `7a64fa5f5f4d7655697cb7b6574d49a8edcd71079da051190d166fe585c52586`；远端重新下载的 EXE 哈希一致，签名更新清单使用正式公钥验签通过。
 - 本机 Steam 清单中的 13 款 64 位游戏全部被识别，32 位《雀魂》因固定方案不支持而被排除；WeGame 版鸣潮继续从卸载记录定位。
 
 测试没有修改真实鸣潮目录，也没有启动游戏。
