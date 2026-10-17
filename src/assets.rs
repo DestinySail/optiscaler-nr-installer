@@ -109,7 +109,7 @@ pub fn prepare(
             let destination = paths
                 .cache
                 .join("extras")
-                .join(format!("{}.zip", extras.version));
+                .join(format!("{}.zip", safe_label(&extras.version)));
             progress(Progress::new(
                 "准备组件",
                 format!("下载固定资源 {}", extras.version),

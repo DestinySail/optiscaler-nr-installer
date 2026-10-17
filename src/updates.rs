@@ -8,7 +8,7 @@ use serde::Deserialize;
 use crate::model::{
     AppPaths, Progress, UPSTREAM_REPO, UpstreamAsset, UpstreamCheckCache, UpstreamRelease,
 };
-use crate::util::{now_ms, read_json, sha256_file, write_json_atomic};
+use crate::util::{now_ms, read_json, safe_relative, sha256_file, write_json_atomic};
 
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
@@ -83,6 +83,10 @@ pub fn check_upstream(paths: &AppPaths) -> Result<UpstreamRelease, String> {
         })
         .max_by_key(|asset| asset.id)
         .ok_or_else(|| "上游最新发布没有 OptScaler-NR-*.zip".to_string())?;
+    let safe_name = safe_relative(std::path::Path::new(&asset.name))?;
+    if safe_name.components().count() != 1 {
+        return Err("上游资产名称不是单个文件名，拒绝使用".to_string());
+    }
     let sha256 = asset
         .digest
         .as_deref()
@@ -95,7 +99,7 @@ pub fn check_upstream(paths: &AppPaths) -> Result<UpstreamRelease, String> {
         published_at: release.published_at.unwrap_or_default(),
         asset: UpstreamAsset {
             id: asset.id,
-            name: asset.name,
+            name: safe_name.to_string_lossy().to_string(),
             size: asset.size,
             sha256,
             url: asset.browser_download_url,

@@ -33,7 +33,7 @@
 - 发布清单：用临时 minisign 密钥签名 `update-manifest.json`，minisign CLI 验签通过；未提供密钥时脚本会移除旧测试签名。
 - 必装 `extras-v1.zip`：152,492,907 字节，SHA-256 `ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533`，包含已校验的 `dlssnr-int4.bin` 和来源说明。
 - 维护 `extras-maintenance-v1.zip`：212,830,627 字节，SHA-256 `0e36bfaf53ec4e4c74d463583714be8570a3abe49475c4b28f12b1104f169de2`，安装器不下载。
-- Release EXE：`OptiScalerNR.exe`，SHA-256 `ecb2f582a5af18580cba852ac22be5e9e96f62095e8f082bf3e78bdee109b4aa`。
+- Release EXE：`OptiScalerNR.exe`，SHA-256 `0dbf8df782f13d8178e78a83aa7147735d3d5ed949602d9a89b607582bdeb017`。
 
 测试没有修改真实鸣潮目录，也没有启动游戏。
 

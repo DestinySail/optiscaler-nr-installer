@@ -587,6 +587,7 @@ fn add_transaction_entry(
     entries: &mut Vec<TransactionEntry>,
     backed_up: &mut HashSet<String>,
 ) -> Result<(), String> {
+    ensure_no_reparse_between(game_dir, target)?;
     if target.exists() && !target.is_file() {
         return Err(format!("目标不是普通文件: {}", target.display()));
     }
@@ -619,6 +620,10 @@ fn rollback_transaction(transaction: &Transaction) -> Result<(), String> {
                 "拒绝恢复游戏目录外路径: {}",
                 entry.target.display()
             ));
+            continue;
+        }
+        if let Err(error) = ensure_no_reparse_between(&transaction.game_dir, &entry.target) {
+            errors.push(error);
             continue;
         }
         let result = if let Some(backup) = &entry.backup {
@@ -664,4 +669,25 @@ fn copy_replacing(source: &Path, target: &Path) -> Result<(), String> {
 fn record_target(game_dir: &Path, relative: &str) -> Result<PathBuf, String> {
     let relative = safe_relative(Path::new(relative))?;
     Ok(game_dir.join(relative))
+}
+
+fn ensure_no_reparse_between(base: &Path, target: &Path) -> Result<(), String> {
+    let relative = target
+        .strip_prefix(base)
+        .map_err(|_| format!("目标不在游戏目录内: {}", target.display()))?;
+    let mut cursor = base.to_path_buf();
+    for component in relative.components() {
+        cursor.push(component);
+        match cursor.symlink_metadata() {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(format!("目标路径包含重解析点: {}", cursor.display()));
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+            Err(error) => {
+                return Err(format!("检查 {} 失败: {error}", cursor.display()));
+            }
+        }
+    }
+    Ok(())
 }
