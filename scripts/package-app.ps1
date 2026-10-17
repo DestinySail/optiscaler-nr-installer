@@ -4,7 +4,8 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Version,
     [string]$Repo = 'DestinySail/optiscaler-nr-installer',
-    [string]$MinisignKey = ''
+    [string]$MinisignKey = '',
+    [string]$MinisignExe = 'minisign'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,15 +36,17 @@ $manifestHash = (Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash
 ) | Set-Content -LiteralPath (Join-Path $dist "app-v$version.sha256") -Encoding ascii
 
 if ($MinisignKey) {
-    if (-not (Get-Command minisign -ErrorAction SilentlyContinue)) {
+    if (-not (Test-Path -LiteralPath $MinisignExe) -and
+        -not (Get-Command $MinisignExe -ErrorAction SilentlyContinue)) {
         throw 'minisign 不在 PATH 中'
     }
-    & minisign -S -s $MinisignKey -m $manifestPath -x $signaturePath
+    & $MinisignExe -S -s $MinisignKey -m $manifestPath -x $signaturePath
     if ($LASTEXITCODE -ne 0) {
         throw 'minisign 签名失败'
     }
 }
 else {
+    Remove-Item -LiteralPath $signaturePath -Force -ErrorAction SilentlyContinue
     Write-Warning '未提供 MinisignKey：可以构建 Release 资产，但不能用于程序自更新。'
 }
 

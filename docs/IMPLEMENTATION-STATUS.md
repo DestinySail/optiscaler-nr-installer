@@ -28,6 +28,7 @@
 - 旧安装接管：预先放入已有 OptiScaler `dxgi.dll` 时识别并继续使用 `dxgi.dll`，基线备份哈希一致，卸载后恢复原文件。
 - 检查/修复：篡改 `dlssnr-amd/shaders/accumulation.txt` 后检查报告 1 个问题，修复后检查通过。
 - 中途失败：锁定 `MFGUnlocker.asi` 令替换失败，已写入的代理、INI、runtime 被回滚，原锁定文件保留，事务日志清除。
+- 发布清单：用临时 minisign 密钥签名 `update-manifest.json`，minisign CLI 验签通过；未提供密钥时脚本会移除旧测试签名。
 - `extras-v1.zip`：317,857,005 字节，SHA-256 `f3d649477ee83a8281e3f5e7cbc45c25486289c3a0b6b0fa860fa725ad8f99bf`。
 - Release EXE：`OptiScalerNR.exe`，SHA-256 `40056129f1700ea1c843812fda080d32a11982a065b476c7a34e230806f7e0a1`。
 

@@ -87,7 +87,8 @@ dist/SHA256SUMS.txt
 .\scripts\package-app.ps1 `
   -Exe .\target\release\OptiScalerNR.exe `
   -Version 0.2.0 `
-  -MinisignKey "$env:USERPROFILE\.minisign\installer.key"
+  -MinisignKey "$env:USERPROFILE\.minisign\installer.key" `
+  -MinisignExe "C:\path\to\minisign.exe"
 ```
 
 ## 本地验证
