@@ -11,7 +11,7 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test
@@ -22,7 +22,7 @@ jobs:
           NR_EXTRAS_VERSION: extras-v1
           NR_EXTRAS_URL: https://github.com/${{ github.repository }}/releases/download/extras-v1/extras-v1.zip
           NR_EXTRAS_SHA256: ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: optiscaler-nr-installer-windows-x64
           path: target/release/OptiScalerNR.exe
