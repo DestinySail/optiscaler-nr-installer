@@ -14,6 +14,11 @@
 - Mochizuki + XeFG 固定 INI 合并；检查、修复、更新、回滚、关闭插帧和卸载。
 - 自有 `app-v*` Release 的签名清单检查、下载、哈希校验和 `self-replace` 更新入口。
 - CI 构建工作流、资源打包脚本和应用发布清单脚本。
+- 公开仓库和三个 Release 已发布：
+  - [仓库](https://github.com/DestinySail/optiscaler-nr-installer)
+  - [app-v0.1.0](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.0)
+  - [extras-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-v1)
+  - [extras-maintenance-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-maintenance-v1)
 
 ## 已验证
 
@@ -31,17 +36,17 @@
 - 检查/修复：篡改 `dlssnr-amd/shaders/accumulation.txt` 后检查报告 1 个问题，修复后检查通过。
 - INI：游戏回写无关键（`HighResMV=true`）后检查仍通过；关闭插帧后检查也按禁用状态通过。
 - 中途失败：锁定 `MFGUnlocker.asi` 令替换失败，已写入的代理、INI、runtime 被回滚，原锁定文件保留，事务日志清除。
-- 发布清单：用临时 minisign 密钥签名 `update-manifest.json`，minisign CLI 验签通过；未提供密钥时脚本会移除旧测试签名。
+- 发布清单：使用正式 minisign 发布密钥签名 `update-manifest.json`，本地和远端下载后均验签通过。
+- 远端资源：安装器从公开 `extras-v1` Release 下载 145.4 MiB 资源，完成 841 个文件安装、检查和卸载。
+- GitHub Actions 的 `main` 构建、测试和 Clippy 检查通过。
 - 必装 `extras-v1.zip`：152,492,907 字节，SHA-256 `ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533`，包含已校验的 `dlssnr-int4.bin` 和来源说明。
 - 维护 `extras-maintenance-v1.zip`：212,830,627 字节，SHA-256 `0e36bfaf53ec4e4c74d463583714be8570a3abe49475c4b28f12b1104f169de2`，安装器不下载。
 - Release EXE：`OptiScalerNR.exe`，SHA-256 `267236d8def1f3d6195b06c69f88b59c133fda9a14ab5f29c90b1c692f8f1d28`，内置更新公钥 `A97B5A26BCAA69D9`。
 
 测试没有修改真实鸣潮目录，也没有启动游戏。
 
-## 发布前剩余
+## 待验证
 
-1. 确认 GitHub 仓库地址。当前代码默认使用 `DestinySail/optiscaler-nr-installer`。
-2. 创建 `extras-v1` Release，上传 `dist/extras-v1.zip`、`dist/SHA256SUMS.txt` 和 `dist/extras-v1.sha256`。
-3. 创建 `app-v0.1.0` Release，上传 `dist/OptiScalerNR.exe`、`dist/update-manifest.json` 和 minisign 签名。
-4. 生成 minisign 密钥，将私钥只保存在发布环境，把公钥通过 `NR_UPDATE_PUBKEY` 编译进正式 EXE。
-5. 至少再选两款游戏完成真实游戏内 NR + XeFG 验证；未实测的游戏继续显示“候选”。
+1. 在真实鸣潮中完成 NR 与 XeFG 的启动、画面和稳定性验收。
+2. 再选两款游戏完成真实游戏内验证；在完成前，它们继续显示为“候选”。
+3. 用更高版本的 `app-v*` Release 演练一次完整的下载、替换、重启和失败恢复流程。
