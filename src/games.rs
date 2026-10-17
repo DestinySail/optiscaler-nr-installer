@@ -9,6 +9,7 @@ use winreg::enums::{
 
 use crate::model::{Compatibility, GameInfo};
 use crate::pe;
+use crate::util::hidden_command;
 
 const KNOWN_EXES: &[(&str, Compatibility)] = &[
     ("Client-Win64-Shipping.exe", Compatibility::Known),
@@ -408,7 +409,7 @@ fn quoted_values(line: &str) -> Vec<String> {
 }
 
 fn reg_value(key: &str, value: &str) -> Option<String> {
-    let output = std::process::Command::new("reg")
+    let output = hidden_command("reg")
         .args(["query", key, "/v", value])
         .output()
         .ok()?;

@@ -5,6 +5,7 @@
 ## 已完成
 
 - Rust / eframe 桌面程序，正常流程为“选择游戏 → 安装进度 → 完成”。
+- 0.1.1 修复 GUI 版启动和扫描时短暂闪现 `reg.exe` / `tasklist.exe` 控制台窗口的问题。
 - DXGI 枚举 GPU；本机识别到 RX 9070 XT（1002:7550）和软件适配器，RDNA4 条件通过。
 - Steam、Epic、Windows 卸载记录和手动 EXE 发现。本机已验证从 WeGame 卸载记录定位鸣潮真实 EXE。
 - 唯一外部组件上游为 `TheAutomatic/dlss-5-amd-project`，匹配稳定版 `OptScaler-NR-*.zip` 和 GitHub SHA-256。
@@ -17,6 +18,7 @@
 - 公开仓库和三个 Release 已发布：
   - [仓库](https://github.com/DestinySail/optiscaler-nr-installer)
   - [app-v0.1.0](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.0)
+  - [app-v0.1.1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.1)
   - [extras-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-v1)
   - [extras-maintenance-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-maintenance-v1)
 
@@ -41,7 +43,7 @@
 - GitHub Actions 的 `main` 构建、测试和 Clippy 检查通过。
 - 必装 `extras-v1.zip`：152,492,907 字节，SHA-256 `ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533`，包含已校验的 `dlssnr-int4.bin` 和来源说明。
 - 维护 `extras-maintenance-v1.zip`：212,830,627 字节，SHA-256 `0e36bfaf53ec4e4c74d463583714be8570a3abe49475c4b28f12b1104f169de2`，安装器不下载。
-- Release EXE：`OptiScalerNR.exe`，SHA-256 `267236d8def1f3d6195b06c69f88b59c133fda9a14ab5f29c90b1c692f8f1d28`，内置更新公钥 `A97B5A26BCAA69D9`。
+- Release EXE 0.1.1：SHA-256 `710700ab563770603781f50d4e991c9dd0903c82deaf3f6920ee0c985429edd5`，内置更新公钥 `A97B5A26BCAA69D9`。
 
 测试没有修改真实鸣潮目录，也没有启动游戏。
 

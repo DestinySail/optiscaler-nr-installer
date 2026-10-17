@@ -108,7 +108,7 @@ pub fn process_is_running(exe: &Path) -> Result<bool, String> {
         .file_name()
         .and_then(|v| v.to_str())
         .ok_or_else(|| "游戏 EXE 名称无效".to_string())?;
-    let output = std::process::Command::new("tasklist")
+    let output = hidden_command("tasklist")
         .args(["/FI", &format!("IMAGENAME eq {name}"), "/FO", "CSV", "/NH"])
         .output()
         .map_err(|e| format!("检查游戏进程失败: {e}"))?;
@@ -116,6 +116,20 @@ pub fn process_is_running(exe: &Path) -> Result<bool, String> {
     Ok(text
         .to_ascii_lowercase()
         .contains(&name.to_ascii_lowercase()))
+}
+
+#[cfg(windows)]
+pub fn hidden_command(program: &str) -> std::process::Command {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut command = std::process::Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
+
+#[cfg(not(windows))]
+pub fn hidden_command(program: &str) -> std::process::Command {
+    std::process::Command::new(program)
 }
 
 pub fn game_id(exe: &Path) -> String {
