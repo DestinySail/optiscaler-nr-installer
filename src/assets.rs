@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use crate::archive::{extract_zip, find_extras_root, find_release_root, read_small_text};
 use crate::model::{AppPaths, Progress, Settings, UpstreamRelease};
 use crate::updates::{check_upstream, download_verified, load_cached_upstream};
-use crate::util::{format_bytes, sha256_file};
+use crate::util::{format_bytes, remove_tree_safely, sha256_file};
 
 #[derive(Debug, Clone)]
 pub struct PreparedComponents {
@@ -176,9 +176,9 @@ fn materialize(
     if destination.join(".__complete").is_file() {
         return Ok(destination);
     }
-    let destination = paths
-        .staging
-        .join(format!("{kind}-{suffix}-{}", crate::util::now_ms()));
+    if destination.exists() {
+        remove_tree_safely(&destination)?;
+    }
     fs::create_dir_all(&destination).map_err(|e| format!("创建 staging 失败: {e}"))?;
     extract_zip(source, &destination, progress_name, &mut *progress)?;
     crate::util::write_atomic(&destination.join(".__complete"), b"ok")?;

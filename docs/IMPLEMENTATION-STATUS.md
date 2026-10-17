@@ -5,6 +5,7 @@
 ## 已完成
 
 - Rust / eframe 桌面程序，正常流程为“选择游戏 → 安装进度 → 完成”。
+- 0.1.4 清理派生解压缓存，组件 staging 使用固定路径，并在启动和安装完成后删除。
 - 0.1.3 取消游戏文件备份和上一版本快照：更新先清理旧注入，卸载删除本项目记录的文件；升级时自动删除旧版遗留备份。
 - 0.1.2 修复 Steam 库漏扫，支持从多个 Steam 库清单发现小型 64 位游戏，并为手动选择 EXE 设置确定的起始目录。
 - 0.1.1 修复 GUI 版启动和扫描时短暂闪现 `reg.exe` / `tasklist.exe` 控制台窗口的问题。
@@ -17,18 +18,19 @@
 - Mochizuki + XeFG 固定 INI 合并；检查、修复、更新、关闭插帧和卸载。
 - 自有 `app-v*` Release 的签名清单检查、下载、哈希校验和 `self-replace` 更新入口。
 - CI 构建工作流、资源打包脚本和应用发布清单脚本。
-- 公开仓库和四个应用 Release 已发布：
+- 公开仓库和五个应用 Release 已发布：
   - [仓库](https://github.com/DestinySail/optiscaler-nr-installer)
   - [app-v0.1.0](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.0)
   - [app-v0.1.1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.1)
   - [app-v0.1.2](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.2)
   - [app-v0.1.3](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.3)
+  - [app-v0.1.4](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.4)
   - [extras-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-v1)
   - [extras-maintenance-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-maintenance-v1)
 
 ## 已验证
 
-- `cargo test`：16 项通过，包含 Steam 清单解析、辅助 EXE 过滤、无备份卸载、失败事务清理、旧备份清理、minisign 清单验签、篡改拒绝、单实例锁、OptiScaler 标记识别和用户偏好保留。
+- `cargo test`：17 项通过，包含 Steam 清单解析、辅助 EXE 过滤、无备份卸载、失败事务清理、旧备份清理、派生 staging 清理、minisign 清单验签、篡改拒绝、单实例锁、OptiScaler 标记识别和用户偏好保留。
 - `cargo clippy --all-targets -- -D warnings`：通过。
 - upstream v1.12.2：实际下载 203.7 MiB 压缩包，解压 990 项成功。
 - 在独立测试目录安装 840 个受管文件，检查通过。
@@ -51,7 +53,9 @@
 - Release EXE 0.1.1：SHA-256 `710700ab563770603781f50d4e991c9dd0903c82deaf3f6920ee0c985429edd5`，内置更新公钥 `A97B5A26BCAA69D9`。
 - Release EXE 0.1.2：SHA-256 `7a64fa5f5f4d7655697cb7b6574d49a8edcd71079da051190d166fe585c52586`；远端重新下载的 EXE 哈希一致，签名更新清单使用正式公钥验签通过。
 - Release EXE 0.1.3：SHA-256 `41ac7d34c8e3e466957a0c677433a9068d808d64a99760448058ad61f5e21236`，签名更新清单使用正式公钥验签通过。
+- Release EXE 0.1.4：SHA-256 `62648ffcf43942837938b2e8c9f50b5be7fc2259d4eedee2622c8d83fec84e75`，签名更新清单使用正式公钥验签通过。
 - 旧版 `backups` 目录中的 6,728 个文件已删除，`backups` 目录不再存在；新安装和更新流程不会重新创建它。
+- 旧版 `staging` 目录中的 21,863 个文件（约 11.5 GiB）已删除；0.1.4 启动后 `staging` 为空，实际游戏安装检查仍通过。
 - 已发布的 0.1.2 安装器实际检查到 `app-v0.1.3` 更新；0.1.3 再次启动后确认没有重建 `backups` 目录。
 - 本机 Steam 清单中的 13 款 64 位游戏全部被识别，32 位《雀魂》因固定方案不支持而被排除；WeGame 版鸣潮继续从卸载记录定位。
 

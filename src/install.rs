@@ -8,8 +8,8 @@ use crate::assets::PreparedComponents;
 use crate::ini;
 use crate::model::{AppPaths, GameInfo, InstallRecord, MaintenanceReport, ManagedFile, Progress};
 use crate::util::{
-    file_contains_marker, game_id, now_ms, process_is_running, read_json, safe_relative,
-    sha256_file, write_json_atomic,
+    file_contains_marker, game_id, now_ms, process_is_running, read_json, remove_tree_safely,
+    safe_relative, sha256_file, write_json_atomic,
 };
 
 #[derive(Debug, Clone)]
@@ -359,7 +359,28 @@ pub fn recover_transactions(paths: &AppPaths) -> Vec<String> {
     if let Some(message) = discard_legacy_backups(paths) {
         messages.push(message);
     }
+    match clear_staging(paths) {
+        Ok(0) => {}
+        Ok(files) => messages.push(format!("已清理组件临时目录：{files} 个文件")),
+        Err(error) => messages.push(format!("清理组件临时目录失败: {error}")),
+    }
     messages
+}
+
+pub fn clear_staging(paths: &AppPaths) -> Result<usize, String> {
+    let files = count_files(&paths.staging);
+    let entries = match fs::read_dir(&paths.staging) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(format!("读取 {} 失败: {error}", paths.staging.display())),
+    };
+    for entry in entries {
+        let path = entry
+            .map_err(|e| format!("读取 {} 失败: {e}", paths.staging.display()))?
+            .path();
+        remove_tree_safely(&path)?;
+    }
+    Ok(files)
 }
 
 fn discard_legacy_backups(paths: &AppPaths) -> Option<String> {
@@ -615,32 +636,6 @@ fn remove_empty_dirs(path: PathBuf) {
     let _ = fs::remove_dir(&path);
 }
 
-fn remove_tree_safely(path: &Path) -> Result<(), String> {
-    let metadata =
-        fs::symlink_metadata(path).map_err(|e| format!("检查 {} 失败: {e}", path.display()))?;
-    if is_reparse(&metadata) {
-        return if metadata.is_dir() {
-            fs::remove_dir(path)
-        } else {
-            fs::remove_file(path)
-        }
-        .map_err(|e| format!("删除重解析点 {} 失败: {e}", path.display()));
-    }
-    if metadata.is_dir() {
-        for entry in fs::read_dir(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?
-        {
-            remove_tree_safely(
-                &entry
-                    .map_err(|e| format!("读取 {} 失败: {e}", path.display()))?
-                    .path(),
-            )?;
-        }
-        fs::remove_dir(path).map_err(|e| format!("删除 {} 失败: {e}", path.display()))
-    } else {
-        fs::remove_file(path).map_err(|e| format!("删除 {} 失败: {e}", path.display()))
-    }
-}
-
 fn is_reparse(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
     {
@@ -822,6 +817,32 @@ mod tests {
 
         assert!(discard_legacy_backups(&paths).is_some());
         assert!(!backups.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn clears_derived_staging_tree() {
+        let root = test_dir("staging");
+        let staging = root.join("staging");
+        fs::create_dir_all(staging.join("upstream").join("nested")).unwrap();
+        fs::write(
+            staging.join("upstream").join("nested").join("file"),
+            "cache",
+        )
+        .unwrap();
+        let paths = AppPaths {
+            cache: root.join("cache"),
+            staging: staging.clone(),
+            legacy_backups: root.join("backups"),
+            games: root.join("games"),
+            updates: root.join("updates"),
+            settings: root.join("settings.json"),
+            upstream_check: root.join("catalog").join("upstream.json"),
+            root: root.clone(),
+        };
+
+        assert_eq!(clear_staging(&paths).unwrap(), 1);
+        assert!(!staging.join("upstream").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

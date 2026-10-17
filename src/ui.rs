@@ -831,9 +831,11 @@ fn run_install(
     let components = assets::prepare(paths, settings, upstream, |progress| {
         let _ = event_tx.send(Event::Progress(progress));
     })?;
-    install::install(paths, game, &components, |progress| {
+    let result = install::install(paths, game, &components, |progress| {
         let _ = event_tx.send(Event::Progress(progress));
-    })
+    });
+    let _ = install::clear_staging(paths);
+    result
 }
 
 fn install_fonts(ctx: &egui::Context) {

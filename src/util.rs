@@ -179,6 +179,45 @@ fn contains(haystack: &[u8], needle: &[u8]) -> bool {
             .any(|window| window == needle)
 }
 
+pub fn remove_tree_safely(path: &Path) -> Result<(), String> {
+    let metadata =
+        fs::symlink_metadata(path).map_err(|e| format!("检查 {} 失败: {e}", path.display()))?;
+    if is_reparse(&metadata) {
+        return if metadata.is_dir() {
+            fs::remove_dir(path)
+        } else {
+            fs::remove_file(path)
+        }
+        .map_err(|e| format!("删除重解析点 {} 失败: {e}", path.display()));
+    }
+    if metadata.is_dir() {
+        for entry in fs::read_dir(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?
+        {
+            remove_tree_safely(
+                &entry
+                    .map_err(|e| format!("读取 {} 失败: {e}", path.display()))?
+                    .path(),
+            )?;
+        }
+        fs::remove_dir(path).map_err(|e| format!("删除 {} 失败: {e}", path.display()))
+    } else {
+        fs::remove_file(path).map_err(|e| format!("删除 {} 失败: {e}", path.display()))
+    }
+}
+
+fn is_reparse(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = metadata;
+        false
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

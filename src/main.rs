@@ -166,6 +166,7 @@ fn headless_install(exe: std::path::PathBuf, args: &[String]) -> Result<(), Stri
             last_stage = progress.stage.clone();
         }
     })?;
+    let _ = install::clear_staging(&paths);
     print_report(report);
     Ok(())
 }
@@ -198,7 +199,9 @@ fn headless_maintenance(
             }
             let upstream = updates::check_upstream(&paths).ok();
             let components = assets::prepare(&paths, &settings, upstream, |_| {})?;
-            install::install(&paths, &game, &components, |_| {})?
+            let report = install::install(&paths, &game, &components, |_| {})?;
+            let _ = install::clear_staging(&paths);
+            report
         }
     };
     print_report(report);
