@@ -18,6 +18,7 @@ pub fn prepare(
     paths: &AppPaths,
     settings: &Settings,
     upstream: Option<UpstreamRelease>,
+    include_extras: bool,
     mut progress: impl FnMut(Progress),
 ) -> Result<PreparedComponents, String> {
     let upstream = if settings.local_upstream_source.is_some() {
@@ -79,66 +80,71 @@ pub fn prepare(
         .filter(|v| !v.is_empty());
     let upstream_tag = actual_version.unwrap_or(upstream_tag);
 
-    let (extras_input, extras_version, extras_key) =
-        if let Some(source) = settings.local_extras_source.as_deref() {
-            progress(Progress::new(
-                "准备组件",
-                format!("使用本地固定资源: {}", source.display()),
-                None,
-            ));
-            let fingerprint = source_fingerprint(source)?;
-            (
-                source.to_path_buf(),
-                "local".to_string(),
-                format!("local-{}", &fingerprint[..fingerprint.len().min(16)]),
-            )
-        } else if let Some(extras) = settings.extras.as_ref() {
-            if extras.url.trim().is_empty() || extras.sha256.trim().is_empty() {
-                return Err("固定资源设置缺少 URL 或 SHA-256".to_string());
-            }
-            let destination = paths
-                .cache
-                .join("extras")
-                .join(format!("{}.zip", safe_label(&extras.version)));
-            progress(Progress::new(
-                "准备组件",
-                format!("下载固定资源 {}", extras.version),
-                Some(0.0),
-            ));
-            download_verified(
-                &extras.url,
-                &destination,
-                &extras.sha256,
-                None,
-                "下载固定资源",
-                &mut progress,
-            )?;
-            (
-                destination,
-                extras.version.clone(),
-                format!(
-                    "{}-{}",
-                    safe_label(&extras.version),
-                    &extras.sha256[..extras.sha256.len().min(12)]
-                ),
-            )
-        } else {
-            return Err(
+    let (extras_root, extras_version) = if include_extras {
+        let (extras_input, extras_version, extras_key) =
+            if let Some(source) = settings.local_extras_source.as_deref() {
+                progress(Progress::new(
+                    "准备组件",
+                    format!("使用本地固定资源: {}", source.display()),
+                    None,
+                ));
+                let fingerprint = source_fingerprint(source)?;
+                (
+                    source.to_path_buf(),
+                    "local".to_string(),
+                    format!("local-{}", &fingerprint[..fingerprint.len().min(16)]),
+                )
+            } else if let Some(extras) = settings.extras.as_ref() {
+                if extras.url.trim().is_empty() || extras.sha256.trim().is_empty() {
+                    return Err("固定资源设置缺少 URL 或 SHA-256".to_string());
+                }
+                let destination = paths
+                    .cache
+                    .join("extras")
+                    .join(format!("{}.zip", safe_label(&extras.version)));
+                progress(Progress::new(
+                    "准备组件",
+                    format!("下载固定资源 {}", extras.version),
+                    Some(0.0),
+                ));
+                download_verified(
+                    &extras.url,
+                    &destination,
+                    &extras.sha256,
+                    None,
+                    "下载固定资源",
+                    &mut progress,
+                )?;
+                (
+                    destination,
+                    extras.version.clone(),
+                    format!(
+                        "{}-{}",
+                        safe_label(&extras.version),
+                        &extras.sha256[..extras.sha256.len().min(12)]
+                    ),
+                )
+            } else {
+                return Err(
             "未配置固定资源包。请在维护页填写 extras-v1.zip 的 URL 和 SHA-256，或导入本地资源包。"
                 .to_string(),
-        );
-        };
-    let extras_root = materialize(
-        paths,
-        &extras_input,
-        "extras",
-        &extras_key,
-        "解压固定资源",
-        &mut progress,
-    )?;
-    let extras_root = find_extras_root(&extras_root)?;
-    validate_extras(&extras_root)?;
-    validate_model_compatibility(&release_root, &extras_root)?;
+                );
+            };
+        let extras_root = materialize(
+            paths,
+            &extras_input,
+            "extras",
+            &extras_key,
+            "解压固定资源",
+            &mut progress,
+        )?;
+        let extras_root = find_extras_root(&extras_root)?;
+        validate_extras(&extras_root)?;
+        validate_model_compatibility(&release_root, &extras_root)?;
+        (extras_root, extras_version)
+    } else {
+        (PathBuf::new(), String::new())
+    };
 
     Ok(PreparedComponents {
         release_root,

@@ -43,11 +43,11 @@ const DIALOG_PADDING: i8 = 24;
 enum Command {
     Refresh,
     CheckUpdates(Settings, bool),
-    DownloadUpstream(UpstreamRelease),
     Install {
         game: GameInfo,
         settings: Settings,
         upstream: Option<UpstreamRelease>,
+        main_package_only: bool,
     },
     Maintain {
         game: GameInfo,
@@ -68,7 +68,6 @@ enum Event {
         warning: Option<String>,
     },
     Progress(Progress),
-    UpstreamDownloaded(Result<(), String>),
     Installed(Result<MaintenanceReport, String>),
     Maintained {
         action: Action,
@@ -120,7 +119,6 @@ pub struct App {
     upstream: Option<UpstreamRelease>,
     checking_updates: bool,
     upstream_error: Option<String>,
-    upstream_download_busy: bool,
     app_update: Option<AppUpdateInfo>,
     screen: Screen,
     page: Page,
@@ -166,7 +164,6 @@ impl App {
             upstream,
             checking_updates: false,
             upstream_error: None,
-            upstream_download_busy: false,
             app_update: None,
             screen: Screen::Select,
             page: Page::Install,
@@ -268,15 +265,6 @@ impl App {
                     }
                 }
                 Event::Progress(progress) => self.progress = progress,
-                Event::UpstreamDownloaded(result) => {
-                    self.upstream_download_busy = false;
-                    self.status = match result {
-                        Ok(()) => {
-                            "主包组件：已校验，旧版缓存已清理。选择游戏，点击右下角部署。".into()
-                        }
-                        Err(error) => format!("主包组件操作失败：{error}"),
-                    };
-                }
                 Event::Installed(result) => match result {
                     Ok(report) => {
                         self.report = Some(report);
@@ -370,6 +358,7 @@ impl App {
             .any(|gpu| gpu.mochizuki_class.supports_fixed_profile())
     }
 
+    #[cfg(test)]
     fn game_has_install(&self, game: &GameInfo) -> bool {
         self.install_statuses
             .get(&installed_key(&game.exe))
@@ -386,7 +375,7 @@ impl App {
     }
 
     fn check_updates(&mut self, force: bool) {
-        if !self.checking_updates && !self.upstream_download_busy {
+        if !self.checking_updates {
             self.checking_updates = true;
             self.status = "正在检查主包组件和安装器更新…".into();
             let _ = self
@@ -470,10 +459,13 @@ impl App {
         self.screen = Screen::Installing;
         self.error = None;
         self.progress = Progress::new("预检查", "准备固定方案", Some(0.0));
+        let main_package_only =
+            self.install_status(&game).starts_with("已安装 ") && self.game_needs_update(&game);
         let _ = self.sender.send(Command::Install {
             game,
             settings: self.settings.clone(),
             upstream: self.upstream.clone(),
+            main_package_only,
         });
     }
 
@@ -852,19 +844,23 @@ impl App {
                 },
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let enabled = self.selected_game().is_some()
-                    && self.can_install()
-                    && !self.app_update_busy
-                    && !self.upstream_download_busy;
-                let label = if self
-                    .selected_game()
-                    .is_some_and(|game| self.game_has_install(game))
-                {
-                    "更新到此游戏  →"
-                } else {
-                    "安装到此游戏  →"
+                let enabled =
+                    self.selected_game().is_some() && self.can_install() && !self.app_update_busy;
+                let label = match self.selected_game() {
+                    Some(game) if self.game_needs_update(game) => "更新主包到此游戏  →",
+                    Some(game) if self.install_status(game).starts_with("已安装 ") => {
+                        "重新安装固定方案  →"
+                    }
+                    Some(game) if self.install_status(game) == "安装未完成" => {
+                        "重新安装固定方案  →"
+                    }
+                    Some(game) if self.install_status(game) == "外部安装" => {
+                        "覆盖安装到此游戏  →"
+                    }
+                    Some(_) => "安装到此游戏  →",
+                    None => "安装到此游戏  →",
                 };
-                if primary_button(ui, label, enabled, 186.0) {
+                if primary_button(ui, label, enabled, 208.0) {
                     self.install_selected();
                 }
             });
@@ -1001,30 +997,19 @@ impl App {
         } else {
             "未检测到受支持的 RDNA4"
         };
-        let download_needed = self.upstream.as_ref().is_some_and(|release| {
-            self.paths
-                .as_ref()
-                .map(|paths| updates::upstream_archive(paths, release))
-                .ok()
-                .and_then(|path| path.metadata().ok())
-                .is_none_or(|meta| !meta.is_file() || meta.len() != release.asset.size)
-        });
         let up_value = match &self.upstream {
             Some(release) => format!(
                 "{} · {}",
                 release.tag,
                 if self.upstream_error.is_some() || self.checking_updates {
                     "缓存"
-                } else if download_needed {
-                    "未下载"
                 } else {
-                    "已校验"
+                    "Stable"
                 },
             ),
             None if self.checking_updates => "检查中…".to_string(),
             None => "检查失败".to_string(),
         };
-        let mut upstream_clicked = false;
 
         let gap = 10.0;
         let width = (ui.available_width() - gap * 2.0) / 3.0;
@@ -1039,48 +1024,14 @@ impl App {
                 gpu_status,
                 if self.can_install() { GREEN } else { AMBER },
             );
-            let rect = info_card(
+            info_card(
                 ui,
                 width,
                 CardIcon::Download,
                 "组件主包",
                 &up_value,
-                "",
+                "部署游戏时下载",
                 VIOLET,
-            );
-            let label = if self.upstream_download_busy {
-                "下载中…"
-            } else if self.checking_updates {
-                "检查中…"
-            } else if download_needed {
-                "下载主包"
-            } else {
-                "检查更新"
-            };
-            let button_rect = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + 58.0, rect.bottom() - CONTENT_INSET - 30.0),
-                egui::vec2((width - 70.0).min(140.0), 30.0),
-            );
-            let response = ui
-                .new_child(egui::UiBuilder::new().max_rect(button_rect).layout(
-                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                ))
-                .add_enabled(
-                    !self.checking_updates && !self.upstream_download_busy && !self.app_update_busy,
-                    egui::Button::new(egui::RichText::new(label).size(12.0).color(VIOLET))
-                        .fill(egui::Color32::from_rgb(30, 30, 54))
-                        .stroke(egui::Stroke::new(1.0, VIOLET))
-                        .corner_radius(5.0),
-                );
-            upstream_clicked = response.clicked();
-            response.on_hover_text(
-                self.upstream_error
-                    .as_deref()
-                    .unwrap_or(if download_needed {
-                        "下载并校验主包，成功后仅保留这一版缓存，不修改游戏。部署需点击右下角按钮。"
-                    } else {
-                        "检查主包组件版本及安装器本身的版本；两项结果将分别显示。"
-                    }),
             );
             info_card(
                 ui,
@@ -1092,15 +1043,6 @@ impl App {
                 BLUE,
             );
         });
-        if upstream_clicked {
-            if download_needed && let Some(release) = self.upstream.clone() {
-                self.upstream_download_busy = true;
-                self.status = "主包组件：正在下载并校验，不修改安装器或游戏…".into();
-                let _ = self.sender.send(Command::DownloadUpstream(release));
-            } else {
-                self.check_updates(true);
-            }
-        }
     }
 
     fn progress_page(&mut self, ui: &mut egui::Ui) {
@@ -2027,23 +1969,21 @@ fn spawn_worker(paths: Result<AppPaths, String>) -> (Sender<Command>, Receiver<E
                         warning,
                     });
                 }
-                Command::DownloadUpstream(release) => {
-                    let result = match &paths {
-                        Ok(paths) => updates::download_upstream(paths, &release, |progress| {
-                            let _ = event_tx.send(Event::Status(progress.detail));
-                        })
-                        .map(|_| ()),
-                        Err(error) => Err(error.clone()),
-                    };
-                    let _ = event_tx.send(Event::UpstreamDownloaded(result));
-                }
                 Command::Install {
                     game,
                     settings,
                     upstream,
+                    main_package_only,
                 } => {
                     let result = match &paths {
-                        Ok(paths) => run_install(paths, &settings, &game, upstream, &event_tx),
+                        Ok(paths) => run_install(
+                            paths,
+                            &settings,
+                            &game,
+                            upstream,
+                            main_package_only,
+                            &event_tx,
+                        ),
                         Err(error) => Err(error.clone()),
                     };
                     let _ = event_tx.send(Event::Installed(result));
@@ -2066,7 +2006,7 @@ fn spawn_worker(paths: Result<AppPaths, String>) -> (Sender<Command>, Receiver<E
                     };
                     let result = match action {
                         Action::Repair | Action::Update => {
-                            run_install(paths, &settings, &game, upstream, &event_tx)
+                            run_install(paths, &settings, &game, upstream, false, &event_tx)
                         }
                         Action::Check => install::check_install(paths, &game),
                         Action::Uninstall => install::uninstall(paths, &game),
@@ -2094,9 +2034,10 @@ fn run_install(
     settings: &Settings,
     game: &GameInfo,
     upstream: Option<UpstreamRelease>,
+    main_package_only: bool,
     event_tx: &Sender<Event>,
 ) -> Result<MaintenanceReport, String> {
-    let components = assets::prepare(paths, settings, upstream, |progress| {
+    let components = assets::prepare(paths, settings, upstream, !main_package_only, |progress| {
         let _ = event_tx.send(Event::Progress(progress));
     })?;
     let result = install::install(paths, game, &components, |progress| {
@@ -3254,7 +3195,6 @@ mod tests {
                 upstream: None,
                 checking_updates: false,
                 upstream_error: None,
-                upstream_download_busy: false,
                 app_update: None,
                 screen: Screen::Select,
                 page: Page::Install,
@@ -3633,17 +3573,12 @@ mod tests {
                 ..
             }
         ));
-        sender.send(Command::DownloadUpstream(release())).unwrap();
-        assert!(matches!(
-            receiver.recv_timeout(Duration::from_secs(5)).unwrap(),
-            Event::UpstreamDownloaded(Err(_))
-        ));
     }
 
     #[test]
     fn five_games_fully_visible_and_update_buttons_work() {
         for size in [egui::vec2(900.0, 650.0), egui::vec2(1180.0, 760.0)] {
-            let (mut app, events, commands) = fixture();
+            let (mut app, _events, commands) = fixture();
             populate_games(&mut app);
             app.selected_game = Some(1);
             let ctx = egui::Context::default();
@@ -3671,34 +3606,6 @@ mod tests {
                     assert!(shape.clip_rect.bottom() <= size.y - 80.0 - CONTENT_INSET + 1.0);
                 }
             }
-            let component_button = output
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect) if rect.fill == egui::Color32::from_rgb(30, 30, 54) => {
-                        Some(rect.rect)
-                    }
-                    _ => None,
-                })
-                .unwrap();
-            let component_card = output
-                .shapes
-                .iter()
-                .find_map(|shape| match &shape.shape {
-                    egui::Shape::Rect(rect)
-                        if rect.fill == CARD
-                            && rect.rect.height() == 96.0
-                            && rect.rect.contains_rect(component_button) =>
-                    {
-                        Some(rect.rect)
-                    }
-                    _ => None,
-                })
-                .unwrap();
-            assert!(
-                (component_card.bottom() - component_button.bottom() - CONTENT_INSET).abs() < 0.1,
-                "card {component_card:?}, button {component_button:?}"
-            );
             let title = output
                 .shapes
                 .iter()
@@ -3715,7 +3622,7 @@ mod tests {
                 .iter()
                 .find_map(|shape| match &shape.shape {
                     egui::Shape::Rect(rect)
-                        if rect.rect.size() == egui::vec2(186.0, ACTION_HEIGHT) =>
+                        if rect.rect.size() == egui::vec2(208.0, ACTION_HEIGHT) =>
                     {
                         Some(rect.rect)
                     }
@@ -3768,7 +3675,7 @@ mod tests {
                     })
                     .collect::<Vec<_>>()
             );
-            for label in ["下载主包", "更新到此游戏  →"] {
+            for label in ["更新主包到此游戏  →"] {
                 let output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
                 let pos = output
                     .shapes
@@ -3800,23 +3707,17 @@ mod tests {
                     .drop_without_applying_deltas();
                 }
                 assert_eq!(app.selected_game, Some(1));
-                if label == "下载主包" {
-                    assert!(app.upstream_download_busy);
-                    assert!(
-                        matches!(commands.try_recv(), Ok(Command::DownloadUpstream(release)) if release.tag == "v1.13.0")
-                    );
-                    assert!(commands.try_recv().is_err());
-                    events.send(Event::UpstreamDownloaded(Ok(()))).unwrap();
-                }
             }
             match commands.try_recv().unwrap() {
                 Command::Install {
                     game,
                     upstream: Some(upstream),
+                    main_package_only,
                     ..
                 } => {
                     assert_eq!(game.exe, app.games[1].exe);
                     assert_eq!(upstream.tag, "v1.13.0");
+                    assert!(main_package_only);
                 }
                 other => panic!("unexpected command: {other:?}"),
             }

@@ -170,7 +170,7 @@ fn headless_install(exe: std::path::PathBuf, args: &[String]) -> Result<(), Stri
     let game = games::inspect_manual(exe)?;
     let upstream = updates::check_upstream(&paths, &settings).ok();
     let mut last_stage = String::new();
-    let components = assets::prepare(&paths, &settings, upstream, |progress| {
+    let components = assets::prepare(&paths, &settings, upstream, true, |progress| {
         if progress.stage != last_stage {
             println!("{}: {}", progress.stage, progress.detail);
             last_stage = progress.stage.clone();
@@ -214,7 +214,7 @@ fn headless_maintenance(
                 ));
             }
             let upstream = updates::check_upstream(&paths, &settings).ok();
-            let components = assets::prepare(&paths, &settings, upstream, |_| {})?;
+            let components = assets::prepare(&paths, &settings, upstream, true, |_| {})?;
             install::install(&paths, &game, &components, |_| {})?
         }
     };

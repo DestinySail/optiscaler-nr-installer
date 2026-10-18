@@ -42,6 +42,17 @@ pub fn install(
     let ini_path = game.game_dir.join("OptiScaler.ini");
     let ini_existed = ini_path.is_file();
     let template_ini = components.release_root.join("OptiScaler.ini");
+    let include_extras = !components.extras_root.as_os_str().is_empty();
+    if !include_extras && existing_record.is_none() {
+        return Err("主包更新需要已有安装记录".to_string());
+    }
+    let extras_version = if include_extras {
+        Some(components.extras_version.clone())
+    } else {
+        existing_record
+            .as_ref()
+            .and_then(|record| record.extras_version.clone())
+    };
 
     progress(Progress::new("预检查", "生成固定方案文件计划", Some(0.02)));
     let mut plan = build_plan(components, &proxy)?;
@@ -87,6 +98,20 @@ pub fn install(
             relative_path: "OptiScaler.ini".to_string(),
             sha256: String::new(),
         });
+    let mut keep_files = plan
+        .iter()
+        .map(|file| file.relative.to_ascii_lowercase())
+        .collect::<HashSet<_>>();
+    keep_files.insert("optiscaler.ini".to_string());
+    if !include_extras && let Some(previous) = existing_record.as_ref() {
+        for file in previous
+            .files
+            .iter()
+            .filter(|file| is_extras_file(&file.relative_path))
+        {
+            keep_files.insert(file.relative_path.to_ascii_lowercase());
+        }
+    }
     let partial_record = InstallRecord {
         schema: 2,
         game_name: game.name.clone(),
@@ -94,7 +119,7 @@ pub fn install(
         installed_at_ms: now_ms(),
         complete: false,
         upstream_tag: components.upstream_tag.clone(),
-        extras_version: Some(components.extras_version.clone()),
+        extras_version: extras_version.clone(),
         profile: crate::model::FIXED_PROFILE.to_string(),
         proxy_file: proxy.clone(),
         files: cleanup_files.into_values().collect(),
@@ -113,7 +138,7 @@ pub fn install(
             Some(0.10),
         ));
         if let Some(previous) = existing_record.as_ref() {
-            remove_record_files(&game.game_dir, previous, true)?;
+            remove_record_files(&game.game_dir, previous, &keep_files)?;
         }
         prune_injection_dirs(&game.game_dir);
         if !ini_path.is_file() {
@@ -163,6 +188,26 @@ pub fn install(
             relative_path: "OptiScaler.ini".to_string(),
             sha256: sha256_file(&ini_path)?,
         });
+        if !include_extras {
+            let previous = existing_record
+                .as_ref()
+                .ok_or_else(|| "主包更新缺少安装记录".to_string())?;
+            for file in previous
+                .files
+                .iter()
+                .filter(|file| is_extras_file(&file.relative_path))
+            {
+                let target = record_target(&game.game_dir, &file.relative_path)?;
+                let actual = sha256_file(&target)?;
+                if !actual.eq_ignore_ascii_case(&file.sha256) {
+                    return Err(format!(
+                        "固定资源已被修改或损坏，请先执行修复: {}",
+                        file.relative_path
+                    ));
+                }
+                managed.push(file.clone());
+            }
+        }
         managed.sort_by(|a, b| {
             a.relative_path
                 .to_ascii_lowercase()
@@ -183,7 +228,7 @@ pub fn install(
             installed_at_ms: now_ms(),
             complete: true,
             upstream_tag: components.upstream_tag.clone(),
-            extras_version: Some(components.extras_version.clone()),
+            extras_version: extras_version.clone(),
             profile: crate::model::FIXED_PROFILE.to_string(),
             proxy_file: proxy.clone(),
             files: managed,
@@ -195,7 +240,10 @@ pub fn install(
                 format!("游戏：{}", game.name),
                 format!("组件：{}", components.upstream_tag),
                 format!("代理：{proxy}"),
-                format!("固定资源：{}", components.extras_version),
+                format!(
+                    "固定资源：{}",
+                    extras_version.as_deref().unwrap_or("保持不变")
+                ),
                 format!("受管文件：{} 个", record.files.len()),
                 format!("覆盖同名文件：{overwrite_count} 个；卸载时按安装记录删除"),
             ],
@@ -278,7 +326,7 @@ pub fn uninstall(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport,
         return Err("游戏正在运行，请完全退出后再卸载".to_string());
     }
     let record = load_record(paths, game)?;
-    let removed = remove_record_files(&game.game_dir, &record, false)?;
+    let removed = remove_record_files(&game.game_dir, &record, &HashSet::new())?;
     let state_dir = paths.games.join(game_id(&game.exe));
     let _ = fs::remove_file(state_dir.join("record.json"));
     prune_injection_dirs(&game.game_dir);
@@ -487,26 +535,37 @@ fn build_plan(components: &PreparedComponents, proxy: &str) -> Result<Vec<Planne
         &components.release_root.join("person-model"),
         "person-model",
     )?;
-    add(
-        &mut files,
-        &components.extras_root.join("MFGUnlocker.asi"),
-        "OptiScaler/plugins/MFGUnlocker.asi",
-    )?;
-    add(
-        &mut files,
-        &components.extras_root.join("dlssnr-amd/dlssnr.bin"),
-        "dlssnr-amd/dlssnr.bin",
-    )?;
-    add(
-        &mut files,
-        &components.extras_root.join("dlssnr-amd/dlssnr-int4.bin"),
-        "dlssnr-amd/dlssnr-int4.bin",
-    )?;
+    if !components.extras_root.as_os_str().is_empty() {
+        add(
+            &mut files,
+            &components.extras_root.join("MFGUnlocker.asi"),
+            "OptiScaler/plugins/MFGUnlocker.asi",
+        )?;
+        add(
+            &mut files,
+            &components.extras_root.join("dlssnr-amd/dlssnr.bin"),
+            "dlssnr-amd/dlssnr.bin",
+        )?;
+        add(
+            &mut files,
+            &components.extras_root.join("dlssnr-amd/dlssnr-int4.bin"),
+            "dlssnr-amd/dlssnr-int4.bin",
+        )?;
+    }
     let mut by_path = BTreeMap::new();
     for file in files {
         by_path.insert(file.relative.to_ascii_lowercase(), file);
     }
     Ok(by_path.into_values().collect())
+}
+
+fn is_extras_file(relative: &str) -> bool {
+    matches!(
+        relative.to_ascii_lowercase().as_str(),
+        "optiscaler/plugins/mfgunlocker.asi"
+            | "dlssnr-amd/dlssnr.bin"
+            | "dlssnr-amd/dlssnr-int4.bin"
+    )
 }
 
 fn add(files: &mut Vec<PlannedFile>, source: &Path, relative: &str) -> Result<(), String> {
@@ -615,11 +674,11 @@ fn count_existing_targets(
 fn remove_record_files(
     game_dir: &Path,
     record: &InstallRecord,
-    keep_ini: bool,
+    keep: &HashSet<String>,
 ) -> Result<usize, String> {
     let mut removed = 0;
     for file in &record.files {
-        if keep_ini && file.relative_path.eq_ignore_ascii_case("OptiScaler.ini") {
+        if keep.contains(&file.relative_path.to_ascii_lowercase()) {
             continue;
         }
         let target = record_target(game_dir, &file.relative_path)?;
@@ -772,7 +831,10 @@ mod tests {
             "OptiScaler/plugins/managed.dll",
         ]);
 
-        assert_eq!(remove_record_files(&game, &install, false).unwrap(), 3);
+        assert_eq!(
+            remove_record_files(&game, &install, &HashSet::new()).unwrap(),
+            3
+        );
         assert!(!game.join("OptiScaler.dll").exists());
         assert!(!game.join(".OptiScaler.dll.optinr.tmp").exists());
         assert!(
@@ -832,6 +894,56 @@ mod tests {
             "OptiScalerNR.abc.__selfdelete__.exe",
             "OptiScalerNR.exe"
         ));
+    }
+
+    #[test]
+    fn main_package_plan_skips_fixed_extras() {
+        let root = test_dir("main-only-plan");
+        let release = root.join("release");
+        fs::create_dir_all(release.join("OptiScaler")).unwrap();
+        fs::create_dir_all(release.join("dlssnr-amd")).unwrap();
+        fs::create_dir_all(release.join("person-model")).unwrap();
+        fs::write(release.join("OptiScaler.dll"), "dll").unwrap();
+        fs::write(release.join("OptiScaler.ini"), "ini").unwrap();
+        fs::write(release.join("MochizukiNrRuntime.dll"), "runtime").unwrap();
+        fs::write(release.join("OptiScaler").join("file"), "file").unwrap();
+        fs::write(release.join("dlssnr-amd").join("file"), "file").unwrap();
+        fs::write(release.join("person-model").join("file"), "file").unwrap();
+        let components = PreparedComponents {
+            release_root: release,
+            extras_root: PathBuf::new(),
+            upstream_tag: "test".to_string(),
+            extras_version: String::new(),
+        };
+        let plan = build_plan(&components, "dxgi.dll").unwrap();
+        assert!(plan.iter().all(|file| !is_extras_file(&file.relative)));
+        assert!(plan.iter().any(|file| file.relative == "dxgi.dll"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn main_package_update_keeps_fixed_extras() {
+        let game = test_dir("main-only-cleanup");
+        fs::write(game.join("OptiScaler.dll"), "old").unwrap();
+        fs::create_dir_all(game.join("OptiScaler").join("plugins")).unwrap();
+        fs::write(
+            game.join("OptiScaler")
+                .join("plugins")
+                .join("MFGUnlocker.asi"),
+            "extra",
+        )
+        .unwrap();
+        let install = record(&["OptiScaler.dll", "OptiScaler/plugins/MFGUnlocker.asi"]);
+        let keep = HashSet::from(["optiscaler/plugins/mfgunlocker.asi".to_string()]);
+        assert_eq!(remove_record_files(&game, &install, &keep).unwrap(), 1);
+        assert!(!game.join("OptiScaler.dll").exists());
+        assert!(
+            game.join("OptiScaler")
+                .join("plugins")
+                .join("MFGUnlocker.asi")
+                .is_file()
+        );
+        fs::remove_dir_all(game).unwrap();
     }
 
     #[test]
