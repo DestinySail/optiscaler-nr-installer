@@ -1,8 +1,8 @@
 [package]
 name = "optiscaler-nr-installer"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2024"
-description = "Windows installer for the fixed OptiScaler NR + Mochizuki + XeFG profile"
+description = "Windows installer for OptiScaler NR + Mochizuki backend + Intel XeFG"
 license = "MIT"
 repository = "https://github.com/DestinySail/optiscaler-nr-installer"
 
