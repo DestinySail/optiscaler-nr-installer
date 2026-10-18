@@ -2,11 +2,11 @@
   "schema": 1,
   "installer": {
     "schema": 1,
-    "version": "0.1.11",
+    "version": "0.2.0",
     "platform": "windows-x64",
-    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.1.11/OptiScalerNR.exe",
-    "sha256": "13fa7cf539e1e4817125f37cdcb4c05a8353be1d0d94a564134e7a2e07de430a",
-    "notes": "OptiScaler NR Installer 0.1.11"
+    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.2.0/OptiScalerNR.exe",
+    "sha256": "3297aae3c57a762b15d6cb695c126242012d00099550342b5043ccc52d32433f",
+    "notes": "OptiScaler NR Installer 0.2.0"
   },
   "upstream": {
     "release_id": 415083241,
@@ -19,6 +19,20 @@
       "sha256": "779b9b5f4d5756f663798e796c2974d09f05077bde9df1ff5ace31e087ce4dfe",
       "url": "https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/v1.12.2/OptScaler-NR-1.12.2.zip",
       "updated_at": "2026-10-16T14:59:27Z"
+    },
+    "checked_at_ms": 0
+  },
+  "reframework": {
+    "release_id": 409334961,
+    "tag": "nightly-01432-d052e8fd3fd41d0a1a33394fcf6e6c19be39b1ee",
+    "published_at": "2026-10-11T01:59:23Z",
+    "asset": {
+      "id": 629512856,
+      "name": "REFramework.zip",
+      "size": 13272178,
+      "sha256": "27376e1da177ddcde9c46b3541bdc6fa1ad54a11d0cab9f7782eff0481455e94",
+      "url": "https://github.com/praydog/REFramework-nightly/releases/download/nightly-01432-d052e8fd3fd41d0a1a33394fcf6e6c19be39b1ee/REFramework.zip",
+      "updated_at": "2026-10-11T01:59:24Z"
     },
     "checked_at_ms": 0
   }
