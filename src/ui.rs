@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
@@ -74,7 +74,7 @@ enum Event {
         action: Action,
         result: Result<MaintenanceReport, String>,
     },
-    AppUpdateApplied(Result<PathBuf, String>),
+    AppUpdateApplied(Result<(), String>),
     Status(String),
 }
 
@@ -279,12 +279,12 @@ impl App {
                 Event::AppUpdateApplied(result) => {
                     self.app_update_busy = false;
                     match result {
-                        Ok(backup) => {
+                        Ok(()) => {
                             self.last_maintenance = Some(MaintenanceReport {
                                 title: "安装器更新已写入".to_string(),
                                 lines: vec![
                                     "关闭本窗口后重新打开即可使用新版本。".to_string(),
-                                    format!("上一版安装器：{}", backup.display()),
+                                    "更新下载文件已清理，未保留旧版安装器。".to_string(),
                                 ],
                             });
                             self.close_after_update = true;
@@ -327,8 +327,8 @@ impl App {
             return;
         };
         for game in &self.games {
-            let status = if let Some(tag) = install::installed_tag(paths, game) {
-                format!("已安装 {tag}")
+            let status = if let Some(status) = install::install_status(paths, game) {
+                status
             } else if file_contains_marker(&game.game_dir.join("dxgi.dll"), "OptiScaler")
                 .unwrap_or(false)
             {
@@ -339,6 +339,19 @@ impl App {
             self.install_statuses
                 .insert(installed_key(&game.exe), status);
         }
+        self.sort_games_by_install();
+    }
+
+    fn sort_games_by_install(&mut self) {
+        let selected = self.selected_game().map(|game| game.exe.clone());
+        let statuses = &self.install_statuses;
+        self.games.sort_by_cached_key(|game| {
+            !statuses
+                .get(&installed_key(&game.exe))
+                .is_some_and(|status| is_managed_status(status))
+        });
+        self.selected_game =
+            selected.and_then(|exe| self.games.iter().position(|game| game.exe == exe));
     }
 
     fn install_status(&self, game: &GameInfo) -> String {
@@ -357,7 +370,7 @@ impl App {
     fn game_has_install(&self, game: &GameInfo) -> bool {
         self.install_statuses
             .get(&installed_key(&game.exe))
-            .is_some_and(|status| status.starts_with("已安装 ") || status == "外部安装")
+            .is_some_and(|status| is_managed_status(status))
     }
 
     fn game_needs_update(&self, game: &GameInfo) -> bool {
@@ -1008,7 +1021,7 @@ impl App {
                             ui.add(
                                 egui::Label::new(
                                     egui::RichText::new(
-                                        "若发生错误，程序会依据事务日志尝试恢复；下载与校验会自动重试。",
+                                        "若发生错误，安装会停止且不自动回滚；请卸载后重新安装。下载与校验会自动重试。",
                                     )
                                     .size(11.0)
                                     .color(egui::Color32::from_rgb(168, 170, 188)),
@@ -1192,7 +1205,7 @@ impl App {
         let managed = enabled
             && self
                 .selected_game()
-                .is_some_and(|game| self.install_status(game).starts_with("已安装 "));
+                .is_some_and(|game| is_managed_status(&self.install_status(game)));
         let mut action = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = gap;
@@ -1233,15 +1246,6 @@ impl App {
             ) {
                 action = Some(Action::Update);
             }
-            maintenance_card(
-                ui,
-                width,
-                MaintIcon::Rotate,
-                "回滚版本",
-                "当前安装器不保留旧版本文件；可先卸载后重新安装指定的上游版本。",
-                false,
-                Some("暂不可用"),
-            );
         });
         ui.add_space(gap);
         ui.horizontal(|ui| {
@@ -1309,7 +1313,7 @@ impl App {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(
-                                "检查、关闭插帧和卸载需本项目的安装记录；修复与更新仍需支持的显卡。当前版本不保留回滚文件。",
+                                "检查、关闭插帧和卸载需本项目的安装记录；修复与更新仍需支持的显卡。安装失败后请卸载重装，安装器不保留回滚文件或组件缓存。",
                             )
                             .size(11.0)
                             .color(egui::Color32::from_rgb(168, 170, 188)),
@@ -1731,7 +1735,7 @@ impl App {
                 }
                 Action::DisableFrameGen => "将修改游戏目录中的配置，关闭 XeFG 插帧。请先退出游戏。",
                 _ => {
-                    "将重新部署固定方案，并清理旧的注入文件。当前安装器不保留旧文件备份，请先退出游戏。"
+                    "将重新部署固定方案；同名文件会直接覆盖。当前安装器不保留旧文件备份，请先退出游戏。"
                 }
             };
             let modal = egui::Modal::new(egui::Id::unique("maintenance-confirm"))
@@ -1832,10 +1836,10 @@ fn spawn_worker(paths: Result<AppPaths, String>) -> (Sender<Command>, Receiver<E
     let (command_tx, command_rx) = channel::<Command>();
     let (event_tx, event_rx) = channel::<Event>();
     std::thread::spawn(move || {
-        if let Ok(paths) = paths.as_ref() {
-            for message in install::recover_transactions(paths) {
-                let _ = event_tx.send(Event::Status(message));
-            }
+        if let Ok(paths) = paths.as_ref()
+            && let Err(error) = install::cleanup_installer_files(paths)
+        {
+            let _ = event_tx.send(Event::Status(format!("清理旧缓存失败：{error}")));
         }
         for command in command_rx {
             match command {
@@ -1946,7 +1950,9 @@ fn run_install(
     let result = install::install(paths, game, &components, |progress| {
         let _ = event_tx.send(Event::Progress(progress));
     });
-    let _ = install::clear_staging(paths);
+    if let Err(error) = install::cleanup_installer_files(paths) {
+        let _ = event_tx.send(Event::Status(format!("清理组件缓存失败：{error}")));
+    }
     result
 }
 
@@ -2389,7 +2395,6 @@ enum MaintIcon {
     Shield,
     Tool,
     Download,
-    Rotate,
     Power,
     Trash,
 }
@@ -2549,23 +2554,6 @@ fn draw_maint_icon(
                 stroke,
             );
         }
-        MaintIcon::Rotate => {
-            draw_arc(painter, c, 8.0, -2.2, 1.5, 1.6, color);
-            painter.line_segment(
-                [
-                    egui::pos2(c.x + 4.0, c.y + 7.0),
-                    egui::pos2(c.x + 9.0, c.y + 7.0),
-                ],
-                stroke,
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(c.x + 8.0, c.y + 3.0),
-                    egui::pos2(c.x + 9.0, c.y + 7.0),
-                ],
-                stroke,
-            );
-        }
         MaintIcon::Power => {
             draw_arc(painter, c, 8.0, -2.2, 1.1, 1.6, color);
             painter.line_segment(
@@ -2629,7 +2617,7 @@ fn game_card(
             egui::accesskit::Role::RadioButton,
             true,
             selected,
-            &game.name,
+            format!("{}，{}", game.name, status),
         )
     });
     let painter = &ui.painter().with_clip_rect(rect);
@@ -2681,39 +2669,63 @@ fn game_card(
     ));
 
     let left = rect.left() + 74.0;
-    let badge_text = game.compatibility.label();
-    let badge_galley = painter.layout_no_wrap(badge_text.to_string(), font(10.0), CYAN);
+    let install_badge = if status.starts_with("已安装 ") {
+        Some((status.split(" · ").next().unwrap_or(status), GREEN, BG))
+    } else if status == "外部安装" {
+        Some(("外部安装", AMBER, BG))
+    } else if status == "安装未完成" {
+        Some(("安装未完成", RED, BG))
+    } else {
+        None
+    };
+    let badges: Vec<_> = [
+        Some((
+            game.compatibility.label(),
+            egui::Color32::from_rgb(22, 43, 52),
+            CYAN,
+        )),
+        install_badge,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|(text, fill, color)| {
+        (
+            truncated_galley(painter, text, bold(11.0), color, 160.0),
+            fill,
+            color,
+        )
+    })
+    .collect();
+    let badge_width: f32 = badges
+        .iter()
+        .map(|(galley, _, _)| galley.size().x + 20.0)
+        .sum();
     let name = truncated_galley(
         painter,
         &game.name,
         bold(16.0),
         TEXT,
-        rect.width() - 190.0 - badge_galley.size().x,
+        rect.width() - 170.0 - badge_width,
     );
     let name_rect = egui::Rect::from_min_size(
         egui::pos2(left, rect.top() + height * 0.25 - name.size().y / 2.0),
         name.size(),
     );
     painter.galley(name_rect.min, name, TEXT);
-    let badge = egui::Rect::from_min_size(
-        egui::pos2(name_rect.right() + 8.0, name_rect.center().y - 8.0),
-        egui::vec2(badge_galley.size().x + 12.0, 16.0),
-    );
-    painter.rect_filled(badge, 4.0, egui::Color32::from_rgb(22, 43, 52));
-    painter.rect_stroke(
-        badge,
-        4.0,
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(37, 74, 84)),
-        egui::StrokeKind::Inside,
-    );
-    painter.galley(
-        egui::pos2(
-            badge.left() + 6.0,
-            badge.center().y - badge_galley.size().y / 2.0,
-        ),
-        badge_galley,
-        CYAN,
-    );
+    let mut badge_left = name_rect.right() + 8.0;
+    for (galley, fill, color) in badges {
+        let badge = egui::Rect::from_min_size(
+            egui::pos2(badge_left, name_rect.center().y - 10.0),
+            egui::vec2(galley.size().x + 12.0, 20.0),
+        );
+        painter.rect_filled(badge, 4.0, fill);
+        painter.galley(
+            egui::pos2(badge.left() + 6.0, badge.center().y - galley.size().y / 2.0),
+            galley,
+            color,
+        );
+        badge_left = badge.right() + 8.0;
+    }
 
     let api = graphics_api(game);
     let bits = match game.architecture {
@@ -3097,6 +3109,10 @@ fn installed_key(exe: &Path) -> String {
         .to_ascii_lowercase()
 }
 
+fn is_managed_status(status: &str) -> bool {
+    status.starts_with("已安装 ") || matches!(status, "外部安装" | "安装未完成")
+}
+
 fn newer_version(latest: &str, installed: &str) -> bool {
     match (
         semver::Version::parse(latest.trim().trim_start_matches(['v', 'V'])),
@@ -3110,6 +3126,7 @@ fn newer_version(latest: &str, installed: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn fixture() -> (App, Sender<Event>, Receiver<Command>) {
         let (sender, commands) = channel();
@@ -3228,6 +3245,98 @@ mod tests {
         app.upstream = Some(release());
         app.install_statuses
             .insert(installed_key(&app.games[1].exe), "已安装 v1.12.2".into());
+    }
+
+    #[test]
+    fn installed_games_stably_sort_first_without_changing_selected_target() {
+        let (mut app, _, _) = fixture();
+        populate_games(&mut app);
+        let original: Vec<_> = app.games.iter().map(|game| game.exe.clone()).collect();
+        app.install_statuses
+            .insert(installed_key(&original[3]), "外部安装".into());
+        app.install_statuses
+            .insert(installed_key(&original[5]), "已安装 1.12.2".into());
+        app.selected_game = Some(4);
+        app.sort_games_by_install();
+        assert_eq!(
+            app.games.iter().map(|game| &game.exe).collect::<Vec<_>>(),
+            [1, 3, 5, 0, 2, 4, 6].map(|index| &original[index])
+        );
+        assert_eq!(app.selected_game().unwrap().exe, original[4]);
+        let once: Vec<_> = app.games.iter().map(|game| game.exe.clone()).collect();
+        app.sort_games_by_install();
+        assert_eq!(
+            app.games.iter().map(|game| &game.exe).collect::<Vec<_>>(),
+            once.iter().collect::<Vec<_>>()
+        );
+        app.install_statuses
+            .insert(installed_key(&original[1]), "未安装".into());
+        app.sort_games_by_install();
+        assert_eq!(app.games[0].exe, original[3]);
+        assert_eq!(app.games[1].exe, original[5]);
+        assert_eq!(app.selected_game().unwrap().exe, original[4]);
+        app.games.clear();
+        app.sort_games_by_install();
+        assert!(app.selected_game.is_none());
+    }
+
+    #[test]
+    fn installed_badges_are_bright_and_keep_versions_and_update_state() {
+        let (app, _, _) = fixture();
+        let ctx = egui::Context::default();
+        install_fonts(&ctx);
+        apply_style(&ctx);
+        for width in [500.0, 900.0] {
+            for height in [56.0, 84.0] {
+                for (status, label, fill) in [
+                    ("已安装 1.12.2", "已安装 1.12.2", GREEN),
+                    ("已安装 v1.12.2 · 可更新", "已安装 v1.12.2", GREEN),
+                    ("外部安装", "外部安装", AMBER),
+                    ("安装未完成", "安装未完成", RED),
+                ] {
+                    let output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(width + 16.0, 200.0),
+                            )),
+                            ..Default::default()
+                        },
+                        |ui| {
+                            ui.set_width(width);
+                            game_card(ui, &app.games[0], status, true, height);
+                        },
+                    );
+                    let text = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Text(text) if text.galley.job.text == label => Some(text),
+                            _ => None,
+                        })
+                        .expect("installation badge must be visible");
+                    assert_eq!(text.fallback_color, BG);
+                    let text_rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    let badge = output
+                        .shapes
+                        .iter()
+                        .find_map(|shape| match &shape.shape {
+                            egui::Shape::Rect(rect)
+                                if rect.fill == fill && rect.rect.contains_rect(text_rect) =>
+                            {
+                                Some(rect.rect)
+                            }
+                            _ => None,
+                        })
+                        .expect("status text must sit inside the contrasting badge");
+                    assert!(
+                        badge.right() < width - 70.0,
+                        "badge must not overlap selection action"
+                    );
+                    output.drop_without_applying_deltas();
+                }
+            }
+        }
     }
 
     #[test]
@@ -3389,6 +3498,14 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn incomplete_install_remains_eligible_for_uninstall() {
+        assert!(is_managed_status("安装未完成"));
+        assert!(is_managed_status("已安装 1.12.2"));
+        assert!(is_managed_status("外部安装"));
+        assert!(!is_managed_status("未安装"));
     }
 
     #[test]
@@ -3930,6 +4047,7 @@ mod tests {
         let (mut app, _events, _commands) = fixture();
         populate_games(&mut app);
         app.selected_game = Some(1);
+        app.sort_games_by_install();
         match std::env::var("NR_UI_PREVIEW").as_deref() {
             Ok("loading") => {
                 app.games.clear();

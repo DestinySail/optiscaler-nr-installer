@@ -2,8 +2,6 @@ use std::collections::{BTreeMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
 use crate::assets::PreparedComponents;
 use crate::ini;
 use crate::model::{AppPaths, GameInfo, InstallRecord, MaintenanceReport, ManagedFile, Progress};
@@ -19,23 +17,6 @@ struct PlannedFile {
     sha256: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct TransactionEntry {
-    target: PathBuf,
-    #[serde(default)]
-    backup: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Transaction {
-    schema: u32,
-    game_dir: PathBuf,
-    #[serde(default)]
-    backup_root: PathBuf,
-    entries: Vec<TransactionEntry>,
-    started_at_ms: u64,
-}
-
 pub fn install(
     paths: &AppPaths,
     game: &GameInfo,
@@ -49,8 +30,14 @@ pub fn install(
     let state_dir = paths.games.join(&id);
     fs::create_dir_all(&state_dir).map_err(|e| format!("创建安装记录目录失败: {e}"))?;
     let record_path = state_dir.join("record.json");
-    let previous_record_path = state_dir.join("previous-record.json");
-    let existing_record = read_json::<InstallRecord>(&record_path).ok();
+    let existing_record = if record_path.is_file() {
+        Some(
+            read_json::<InstallRecord>(&record_path)
+                .map_err(|error| format!("安装记录损坏，拒绝覆盖：{error}"))?,
+        )
+    } else {
+        None
+    };
     let proxy = choose_proxy(&game.game_dir, existing_record.as_ref())?;
     let ini_path = game.game_dir.join("OptiScaler.ini");
     let ini_existed = ini_path.is_file();
@@ -70,35 +57,55 @@ pub fn install(
     if duplicate.len() != plan.len() {
         return Err("文件计划存在大小写冲突".to_string());
     }
+    let overwrite_count = count_existing_targets(&game.game_dir, &plan, &ini_path)?;
+    if overwrite_count > 0 {
+        progress(Progress::new(
+            "预检查",
+            format!("发现 {overwrite_count} 个同名文件，将直接覆盖"),
+            Some(0.04),
+        ));
+    }
+
+    let mut cleanup_files = BTreeMap::new();
+    if let Some(previous) = existing_record.as_ref() {
+        for file in &previous.files {
+            cleanup_files.insert(file.relative_path.to_ascii_lowercase(), file.clone());
+        }
+    }
+    for file in &plan {
+        cleanup_files.insert(
+            file.relative.to_ascii_lowercase(),
+            ManagedFile {
+                relative_path: file.relative.clone(),
+                sha256: file.sha256.clone(),
+            },
+        );
+    }
+    cleanup_files
+        .entry("optiscaler.ini".to_string())
+        .or_insert_with(|| ManagedFile {
+            relative_path: "OptiScaler.ini".to_string(),
+            sha256: String::new(),
+        });
+    let partial_record = InstallRecord {
+        schema: 2,
+        game_name: game.name.clone(),
+        exe: game.exe.clone(),
+        installed_at_ms: now_ms(),
+        complete: false,
+        upstream_tag: components.upstream_tag.clone(),
+        extras_version: Some(components.extras_version.clone()),
+        profile: crate::model::FIXED_PROFILE.to_string(),
+        proxy_file: proxy.clone(),
+        files: cleanup_files.into_values().collect(),
+    };
+    write_json_atomic(&record_path, &partial_record)?;
 
     progress(Progress::new(
         "清理",
-        "检查现有文件，不保留游戏文件备份",
+        "移除旧版本受管文件，不保留游戏文件备份",
         Some(0.08),
     ));
-    let mut entries = Vec::new();
-    let mut seen = HashSet::new();
-    for file in &plan {
-        let target = game.game_dir.join(&file.relative);
-        add_transaction_entry(&game.game_dir, &target, &mut entries, &mut seen)?;
-    }
-    add_transaction_entry(&game.game_dir, &ini_path, &mut entries, &mut seen)?;
-    if let Some(previous) = existing_record.as_ref() {
-        for file in &previous.files {
-            let target = record_target(&game.game_dir, &file.relative_path)?;
-            add_transaction_entry(&game.game_dir, &target, &mut entries, &mut seen)?;
-        }
-    }
-    let transaction_path = state_dir.join("transaction.json");
-    let transaction = Transaction {
-        schema: 2,
-        game_dir: game.game_dir.clone(),
-        backup_root: PathBuf::new(),
-        entries: entries.clone(),
-        started_at_ms: now_ms(),
-    };
-    write_json_atomic(&transaction_path, &transaction)?;
-
     let result = (|| {
         progress(Progress::new(
             "清理",
@@ -108,7 +115,7 @@ pub fn install(
         if let Some(previous) = existing_record.as_ref() {
             remove_record_files(&game.game_dir, previous, true)?;
         }
-        remove_injection_dirs(&game.game_dir)?;
+        prune_injection_dirs(&game.game_dir);
         if !ini_path.is_file() {
             progress(Progress::new("应用", "创建 OptiScaler.ini", None));
             copy_replacing(&template_ini, &ini_path)?;
@@ -174,6 +181,7 @@ pub fn install(
             game_name: game.name.clone(),
             exe: game.exe.clone(),
             installed_at_ms: now_ms(),
+            complete: true,
             upstream_tag: components.upstream_tag.clone(),
             extras_version: Some(components.extras_version.clone()),
             profile: crate::model::FIXED_PROFILE.to_string(),
@@ -181,9 +189,7 @@ pub fn install(
             files: managed,
         };
         write_json_atomic(&record_path, &record)?;
-        let _ = fs::remove_file(&previous_record_path);
-        fs::remove_file(&transaction_path).map_err(|e| format!("提交事务记录失败: {e}"))?;
-        Ok(MaintenanceReport {
+        let mut report = MaintenanceReport {
             title: "安装完成".to_string(),
             lines: vec![
                 format!("游戏：{}", game.name),
@@ -191,32 +197,33 @@ pub fn install(
                 format!("代理：{proxy}"),
                 format!("固定资源：{}", components.extras_version),
                 format!("受管文件：{} 个", record.files.len()),
-                "不保留游戏文件备份；卸载会删除本项目注入的文件".to_string(),
+                format!("覆盖同名文件：{overwrite_count} 个；卸载时按安装记录删除"),
             ],
-        })
+        };
+        if let Err(error) = cleanup_installer_files(paths) {
+            report
+                .lines
+                .push(format!("安装已完成，但组件缓存清理失败：{error}"));
+        }
+        Ok(report)
     })();
 
-    if let Err(error) = &result {
-        return match rollback_transaction(&transaction) {
-            Ok(()) => {
-                let _ = fs::remove_file(&transaction_path);
-                let _ = fs::remove_file(&record_path);
-                let _ = fs::remove_file(&previous_record_path);
-                prune_injection_dirs(&game.game_dir);
-                Err(format!(
-                    "{error}\n已移除本次注入的文件，游戏恢复到无本项目状态。"
-                ))
-            }
-            Err(rollback_error) => Err(format!(
-                "{error}\n自动清理未完成：{rollback_error}\n事务日志已保留，下次启动会继续清理。"
-            )),
-        };
+    match result {
+        Ok(report) => Ok(report),
+        Err(error) => Err(format!(
+            "{error}\n安装未完成，未执行自动回滚；请先在维护页卸载，再重新安装。"
+        )),
     }
-    result
 }
 
 pub fn check_install(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport, String> {
     let record = load_record(paths, game)?;
+    if !record.complete {
+        return Ok(MaintenanceReport {
+            title: "上次安装未完成".to_string(),
+            lines: vec!["请先卸载该游戏，再重新安装".to_string()],
+        });
+    }
     let mut issues = Vec::new();
     for file in &record.files {
         let target = record_target(&game.game_dir, &file.relative_path)?;
@@ -254,10 +261,16 @@ pub fn check_install(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceRep
     Ok(MaintenanceReport { title, lines })
 }
 
-pub fn installed_tag(paths: &AppPaths, game: &GameInfo) -> Option<String> {
+pub fn install_status(paths: &AppPaths, game: &GameInfo) -> Option<String> {
     read_json::<InstallRecord>(&paths.games.join(game_id(&game.exe)).join("record.json"))
         .ok()
-        .map(|record| record.upstream_tag)
+        .map(|record| {
+            if record.complete {
+                format!("已安装 {}", record.upstream_tag)
+            } else {
+                "安装未完成".to_string()
+            }
+        })
 }
 
 pub fn uninstall(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport, String> {
@@ -268,15 +281,20 @@ pub fn uninstall(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport,
     let removed = remove_record_files(&game.game_dir, &record, false)?;
     let state_dir = paths.games.join(game_id(&game.exe));
     let _ = fs::remove_file(state_dir.join("record.json"));
-    let _ = fs::remove_file(state_dir.join("previous-record.json"));
     prune_injection_dirs(&game.game_dir);
-    Ok(MaintenanceReport {
+    let mut report = MaintenanceReport {
         title: "卸载完成".to_string(),
         lines: vec![
             format!("删除 {removed} 个注入文件"),
             "游戏已恢复到无本项目注入的状态，未保留旧版本备份".to_string(),
         ],
-    })
+    };
+    if let Err(error) = cleanup_installer_files(paths) {
+        report
+            .lines
+            .push(format!("卸载已完成，但组件缓存清理失败：{error}"));
+    }
+    Ok(report)
 }
 
 pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport, String> {
@@ -284,6 +302,9 @@ pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<Maintenanc
         return Err("游戏正在运行，请完全退出后再修改".to_string());
     }
     let mut record = load_record(paths, game)?;
+    if !record.complete {
+        return Err("上次安装未完成，请先卸载后重新安装".to_string());
+    }
     let ini_path = game.game_dir.join("OptiScaler.ini");
     if !ini_path.is_file() {
         return Err("游戏目录中没有 OptiScaler.ini".to_string());
@@ -322,49 +343,37 @@ pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<Maintenanc
     })
 }
 
-pub fn recover_transactions(paths: &AppPaths) -> Vec<String> {
-    let mut messages = Vec::new();
-    if let Ok(entries) = fs::read_dir(&paths.games) {
+pub fn cleanup_installer_files(paths: &AppPaths) -> Result<(), String> {
+    clear_staging(paths)?;
+    for path in [
+        paths.cache.clone(),
+        paths.legacy_backups.clone(),
+        paths.root.join("catalog"),
+    ] {
+        remove_if_exists(&path)?;
+    }
+    if let Ok(entries) = fs::read_dir(&paths.updates) {
         for entry in entries.flatten() {
-            let state_dir = entry.path();
-            let path = state_dir.join("transaction.json");
-            let Ok(transaction) = read_json::<Transaction>(&path) else {
-                continue;
-            };
-            if read_json::<InstallRecord>(&state_dir.join("record.json"))
-                .is_ok_and(|record| record.installed_at_ms >= transaction.started_at_ms)
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if name == "previous.json"
+                || name.ends_with(".part")
+                || name.starts_with("previous-") && name.ends_with(".exe")
+                || name.starts_with("optiscalernr-") && name.ends_with(".exe")
             {
-                let _ = fs::remove_file(&path);
-                messages.push(format!(
-                    "上次事务已完成提交，清理日志：{}",
-                    transaction.game_dir.display()
-                ));
-                continue;
-            }
-            match rollback_transaction(&transaction) {
-                Ok(()) => {
-                    let _ = fs::remove_file(&path);
-                    messages.push(format!(
-                        "已清理上次未完成事务：{}",
-                        transaction.game_dir.display()
-                    ));
-                }
-                Err(error) => messages.push(format!(
-                    "未完成事务恢复失败 {}: {error}",
-                    transaction.game_dir.display()
-                )),
+                remove_if_exists(&path)?;
             }
         }
     }
-    if let Some(message) = discard_legacy_backups(paths) {
-        messages.push(message);
+    if let Ok(entries) = fs::read_dir(&paths.games) {
+        for entry in entries.flatten() {
+            let state_dir = entry.path();
+            for name in ["transaction.json", "previous-record.json"] {
+                remove_if_exists(&state_dir.join(name))?;
+            }
+        }
     }
-    match clear_staging(paths) {
-        Ok(0) => {}
-        Ok(files) => messages.push(format!("已清理组件临时目录：{files} 个文件")),
-        Err(error) => messages.push(format!("清理组件临时目录失败: {error}")),
-    }
-    messages
+    Ok(())
 }
 
 pub fn clear_staging(paths: &AppPaths) -> Result<usize, String> {
@@ -383,22 +392,11 @@ pub fn clear_staging(paths: &AppPaths) -> Result<usize, String> {
     Ok(files)
 }
 
-fn discard_legacy_backups(paths: &AppPaths) -> Option<String> {
-    if !paths.legacy_backups.exists() {
-        return None;
-    }
-    let pending_transaction = fs::read_dir(&paths.games).is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|entry| entry.path().join("transaction.json").is_file())
-    });
-    if pending_transaction {
-        return Some("存在未完成事务，旧版本备份暂未删除".to_string());
-    }
-    let files = count_files(&paths.legacy_backups);
-    match remove_tree_safely(&paths.legacy_backups) {
-        Ok(()) => Some(format!("已删除旧版本本地备份：{files} 个文件")),
-        Err(error) => Some(format!("删除旧版本本地备份失败: {error}")),
+fn remove_if_exists(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(_) => remove_tree_safely(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("检查 {} 失败: {error}", path.display())),
     }
 }
 
@@ -421,8 +419,11 @@ fn count_files(root: &Path) -> usize {
 }
 
 fn load_record(paths: &AppPaths, game: &GameInfo) -> Result<InstallRecord, String> {
-    read_json(&paths.games.join(game_id(&game.exe)).join("record.json"))
-        .map_err(|_| "这个游戏还没有本程序的安装记录".to_string())
+    let path = paths.games.join(game_id(&game.exe)).join("record.json");
+    if !path.is_file() {
+        return Err("这个游戏还没有本程序的安装记录".to_string());
+    }
+    read_json(&path).map_err(|error| format!("安装记录损坏: {error}"))
 }
 
 fn build_plan(components: &PreparedComponents, proxy: &str) -> Result<Vec<PlannedFile>, String> {
@@ -551,28 +552,35 @@ fn choose_proxy(game_dir: &Path, record: Option<&InstallRecord>) -> Result<Strin
     Err("常用代理名称均已被游戏目录占用，拒绝覆盖未知 DLL".to_string())
 }
 
-fn add_transaction_entry(
+fn count_existing_targets(
     game_dir: &Path,
-    target: &Path,
-    entries: &mut Vec<TransactionEntry>,
-    seen: &mut HashSet<String>,
-) -> Result<(), String> {
-    ensure_no_reparse_between(game_dir, target)?;
-    if target.exists() && !target.is_file() {
-        return Err(format!("目标不是普通文件: {}", target.display()));
+    plan: &[PlannedFile],
+    ini_path: &Path,
+) -> Result<usize, String> {
+    let mut count = 0;
+    for file in plan {
+        let target = game_dir.join(&file.relative);
+        ensure_no_reparse_between(game_dir, &target)?;
+        if target.exists() {
+            if !target.is_file() {
+                return Err(format!("目标不是普通文件: {}", target.display()));
+            }
+            count += 1;
+        }
     }
-    let relative = target
-        .strip_prefix(game_dir)
-        .map_err(|_| format!("目标不在游戏目录内: {}", target.display()))?;
-    let key = relative.to_string_lossy().to_ascii_lowercase();
-    if !seen.insert(key) {
-        return Ok(());
+    if ini_path.exists() {
+        ensure_no_reparse_between(game_dir, ini_path)?;
+        if !ini_path.is_file() {
+            return Err(format!("目标不是普通文件: {}", ini_path.display()));
+        }
+        if !plan
+            .iter()
+            .any(|file| file.relative.eq_ignore_ascii_case("OptiScaler.ini"))
+        {
+            count += 1;
+        }
     }
-    entries.push(TransactionEntry {
-        target: target.to_path_buf(),
-        backup: None,
-    });
-    Ok(())
+    Ok(count)
 }
 
 fn remove_record_files(
@@ -587,6 +595,13 @@ fn remove_record_files(
         }
         let target = record_target(game_dir, &file.relative_path)?;
         ensure_no_reparse_between(game_dir, &target)?;
+        if let Some(name) = target.file_name().and_then(|name| name.to_str()) {
+            let temporary = target.with_file_name(format!(".{name}.optinr.tmp"));
+            if temporary.is_file() {
+                fs::remove_file(&temporary)
+                    .map_err(|e| format!("删除 {} 失败: {e}", temporary.display()))?;
+            }
+        }
         if target.is_file() {
             fs::remove_file(&target).map_err(|e| format!("删除 {} 失败: {e}", target.display()))?;
             removed += 1;
@@ -599,26 +614,6 @@ fn prune_injection_dirs(game_dir: &Path) {
     for relative in ["OptiScaler", "dlssnr-amd", "person-model"] {
         remove_empty_dirs(game_dir.join(relative));
     }
-}
-
-fn remove_injection_dirs(game_dir: &Path) -> Result<(), String> {
-    for relative in ["OptiScaler", "dlssnr-amd", "person-model"] {
-        let path = game_dir.join(relative);
-        let metadata = match fs::symlink_metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(format!("检查 {} 失败: {error}", path.display())),
-        };
-        if metadata.file_type().is_symlink() {
-            return Err(format!("拒绝清理重解析点: {}", path.display()));
-        }
-        if metadata.is_dir() {
-            remove_tree_safely(&path)?;
-        } else {
-            fs::remove_file(&path).map_err(|e| format!("清理 {} 失败: {e}", path.display()))?;
-        }
-    }
-    Ok(())
 }
 
 fn remove_empty_dirs(path: PathBuf) {
@@ -646,44 +641,6 @@ fn is_reparse(metadata: &fs::Metadata) -> bool {
     {
         let _ = metadata;
         false
-    }
-}
-
-fn rollback_transaction(transaction: &Transaction) -> Result<(), String> {
-    let mut errors = Vec::new();
-    for entry in transaction.entries.iter().rev() {
-        if !entry.target.starts_with(&transaction.game_dir) {
-            errors.push(format!(
-                "拒绝恢复游戏目录外路径: {}",
-                entry.target.display()
-            ));
-            continue;
-        }
-        if let Err(error) = ensure_no_reparse_between(&transaction.game_dir, &entry.target) {
-            errors.push(error);
-            continue;
-        }
-        let result = if let Some(backup) = &entry.backup {
-            if !backup.starts_with(&transaction.backup_root) {
-                Err(format!("拒绝读取备份目录外文件: {}", backup.display()))
-            } else {
-                copy_replacing(backup, &entry.target)
-            }
-        } else if entry.target.is_file() {
-            fs::remove_file(&entry.target)
-                .map_err(|e| format!("删除 {} 失败: {e}", entry.target.display()))
-        } else {
-            Ok(())
-        };
-        if let Err(error) = result {
-            errors.push(error);
-        }
-    }
-    prune_injection_dirs(&transaction.game_dir);
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors.join("; "))
     }
 }
 
@@ -747,6 +704,7 @@ mod tests {
             game_name: "Test".to_string(),
             exe: PathBuf::from("Test.exe"),
             installed_at_ms: 0,
+            complete: true,
             upstream_tag: "1".to_string(),
             extras_version: None,
             profile: "test".to_string(),
@@ -765,57 +723,136 @@ mod tests {
     fn uninstall_removes_managed_files_and_keeps_game_files() {
         let game = test_dir("uninstall");
         fs::write(game.join("OptiScaler.dll"), "injected").unwrap();
+        fs::write(game.join(".OptiScaler.dll.optinr.tmp"), "temporary").unwrap();
         fs::write(game.join("OptiScaler.ini"), "config").unwrap();
+        fs::create_dir_all(game.join("OptiScaler").join("plugins")).unwrap();
+        fs::write(
+            game.join("OptiScaler").join("plugins").join("managed.dll"),
+            "injected",
+        )
+        .unwrap();
+        fs::write(
+            game.join("OptiScaler").join("plugins").join("user.asi"),
+            "user",
+        )
+        .unwrap();
         fs::write(game.join("Game.exe"), "game").unwrap();
-        let install = record(&["OptiScaler.dll", "OptiScaler.ini"]);
+        let install = record(&[
+            "OptiScaler.dll",
+            "OptiScaler.ini",
+            "OptiScaler/plugins/managed.dll",
+        ]);
 
-        assert_eq!(remove_record_files(&game, &install, false).unwrap(), 2);
+        assert_eq!(remove_record_files(&game, &install, false).unwrap(), 3);
         assert!(!game.join("OptiScaler.dll").exists());
+        assert!(!game.join(".OptiScaler.dll.optinr.tmp").exists());
+        assert!(
+            !game
+                .join("OptiScaler")
+                .join("plugins")
+                .join("managed.dll")
+                .exists()
+        );
+        assert!(
+            game.join("OptiScaler")
+                .join("plugins")
+                .join("user.asi")
+                .is_file()
+        );
         assert!(game.join("Game.exe").is_file());
+        prune_injection_dirs(&game);
+        assert!(game.join("OptiScaler").join("plugins").is_dir());
+        fs::remove_file(game.join("OptiScaler").join("plugins").join("user.asi")).unwrap();
+        prune_injection_dirs(&game);
+        assert!(!game.join("OptiScaler").exists());
         fs::remove_dir_all(game).unwrap();
     }
 
     #[test]
-    fn failed_transaction_removes_new_injection() {
-        let game = test_dir("transaction");
-        let target = game.join("OptiScaler.dll");
-        fs::write(&target, "injected").unwrap();
-        let transaction = Transaction {
-            schema: 2,
-            game_dir: game.clone(),
-            backup_root: PathBuf::new(),
-            entries: vec![TransactionEntry {
-                target: target.clone(),
-                backup: None,
-            }],
-            started_at_ms: 1,
-        };
-
-        rollback_transaction(&transaction).unwrap();
-        assert!(!target.exists());
+    fn install_counts_existing_same_name_files_for_notice() {
+        let game = test_dir("overwrite-notice");
+        fs::write(game.join("OptiScaler.dll"), "original").unwrap();
+        fs::write(game.join("OptiScaler.ini"), "original").unwrap();
+        let plan = [PlannedFile {
+            source: game.join("source"),
+            relative: "OptiScaler.dll".to_string(),
+            sha256: String::new(),
+        }];
+        assert_eq!(
+            count_existing_targets(&game, &plan, &game.join("OptiScaler.ini")).unwrap(),
+            2
+        );
+        assert_eq!(
+            fs::read_to_string(game.join("OptiScaler.dll")).unwrap(),
+            "original"
+        );
         fs::remove_dir_all(game).unwrap();
     }
 
     #[test]
-    fn removes_legacy_backup_tree() {
-        let root = test_dir("legacy");
+    fn cleanup_keeps_only_records_and_catalog_metadata() {
+        let root = test_dir("cleanup");
+        let cache = root.join("cache");
+        let staging = root.join("staging");
         let games = root.join("games");
         let backups = root.join("backups");
-        fs::create_dir_all(&games).unwrap();
+        let updates = root.join("updates");
+        let catalog = root.join("catalog");
+        fs::create_dir_all(cache.join("upstream").join("1")).unwrap();
+        fs::create_dir_all(cache.join("extras")).unwrap();
+        fs::create_dir_all(staging.join("upstream")).unwrap();
+        fs::create_dir_all(games.join("game")).unwrap();
         fs::create_dir_all(backups.join("game").join("snapshot")).unwrap();
+        fs::create_dir_all(updates.clone()).unwrap();
+        fs::create_dir_all(catalog.join("old")).unwrap();
+        fs::write(
+            cache.join("upstream").join("1").join("package.zip"),
+            "cache",
+        )
+        .unwrap();
+        fs::write(cache.join("extras").join("extras-v1.zip"), "cache").unwrap();
+        fs::write(staging.join("upstream").join("file"), "cache").unwrap();
+        fs::write(games.join("game").join("record.json"), "{}").unwrap();
+        fs::write(games.join("game").join("transaction.json"), "{}").unwrap();
+        fs::write(games.join("game").join("previous-record.json"), "{}").unwrap();
         fs::write(backups.join("game").join("snapshot").join("file"), "old").unwrap();
+        fs::write(catalog.join("old").join("file"), "old").unwrap();
+        fs::write(updates.join("catalog-cache.json"), "{}").unwrap();
+        for name in [
+            "OptiScalerNR-0.2.0.exe",
+            "previous-0.1.5.exe",
+            "previous.json",
+            "update.part",
+        ] {
+            fs::write(updates.join(name), "old").unwrap();
+        }
         let paths = AppPaths {
-            cache: root.join("cache"),
-            staging: root.join("staging"),
+            cache: cache.clone(),
+            staging: staging.clone(),
             legacy_backups: backups.clone(),
-            games,
-            updates: root.join("updates"),
+            games: games.clone(),
+            updates: updates.clone(),
             settings: root.join("settings.json"),
             root: root.clone(),
         };
 
-        assert!(discard_legacy_backups(&paths).is_some());
+        cleanup_installer_files(&paths).unwrap();
+        assert!(!cache.exists());
+        assert_eq!(fs::read_dir(&staging).unwrap().count(), 0);
         assert!(!backups.exists());
+        assert!(!catalog.exists());
+        assert!(updates.join("catalog-cache.json").is_file());
+        for name in [
+            "OptiScalerNR-0.2.0.exe",
+            "previous-0.1.5.exe",
+            "previous.json",
+            "update.part",
+        ] {
+            assert!(!updates.join(name).exists());
+        }
+        assert!(games.join("game").join("record.json").is_file());
+        assert!(!games.join("game").join("transaction.json").exists());
+        assert!(!games.join("game").join("previous-record.json").exists());
         fs::remove_dir_all(root).unwrap();
     }
 

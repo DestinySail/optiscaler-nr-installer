@@ -16,16 +16,11 @@ mod updates;
 mod util;
 
 fn main() {
-    let diagnose_only = std::env::args().any(|arg| arg == "--diagnose");
-    let _instance = if diagnose_only {
-        None
-    } else {
-        match single_instance::acquire() {
-            Ok(guard) => Some(guard),
-            Err(error) => {
-                show_fatal(&error);
-                std::process::exit(2);
-            }
+    let _instance = match single_instance::acquire() {
+        Ok(guard) => guard,
+        Err(error) => {
+            show_fatal(&error);
+            std::process::exit(2);
         }
     };
     if let Err(error) = run() {
@@ -66,7 +61,6 @@ fn run() -> Result<(), String> {
         ("--repair", model::Action::Repair),
         ("--uninstall", model::Action::Uninstall),
         ("--disable-fg", model::Action::DisableFrameGen),
-        ("--rollback", model::Action::Uninstall),
     ] {
         if let Some(index) = args.iter().position(|arg| arg == flag) {
             let exe = args
@@ -99,8 +93,8 @@ fn diagnose() -> Result<(), String> {
     let paths = model::AppPaths::discover()?;
     println!("{} {}", model::APP_NAME, model::APP_VERSION);
     println!("数据目录: {}", paths.root.display());
-    for message in install::recover_transactions(&paths) {
-        println!("{message}");
+    if let Err(error) = install::cleanup_installer_files(&paths) {
+        println!("清理旧缓存失败: {error}");
     }
     for gpu in gpu::detect_gpus()? {
         println!(
@@ -171,7 +165,6 @@ fn headless_install(exe: std::path::PathBuf, args: &[String]) -> Result<(), Stri
             last_stage = progress.stage.clone();
         }
     })?;
-    let _ = install::clear_staging(&paths);
     print_report(report);
     Ok(())
 }
@@ -204,9 +197,7 @@ fn headless_maintenance(
             }
             let upstream = updates::check_upstream(&paths, &settings).ok();
             let components = assets::prepare(&paths, &settings, upstream, |_| {})?;
-            let report = install::install(&paths, &game, &components, |_| {})?;
-            let _ = install::clear_staging(&paths);
-            report
+            install::install(&paths, &game, &components, |_| {})?
         }
     };
     print_report(report);

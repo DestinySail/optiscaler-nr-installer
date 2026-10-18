@@ -1,12 +1,10 @@
 use std::fs;
-use std::path::PathBuf;
 
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
 use crate::model::{APP_VERSION, AppPaths, Settings};
 use crate::updates::download_verified;
-use crate::util::{sha256_file, write_json_atomic};
 
 #[derive(Debug, Clone)]
 pub struct AppUpdateInfo {
@@ -86,7 +84,7 @@ pub fn validate_manifest(repo: &str, manifest: &UpdateManifest) -> Result<(), St
     Ok(())
 }
 
-pub fn apply(paths: &AppPaths, update: &AppUpdateInfo) -> Result<PathBuf, String> {
+pub fn apply(paths: &AppPaths, update: &AppUpdateInfo) -> Result<(), String> {
     let filename = format!("OptiScalerNR-{}.exe", update.version);
     let downloaded = paths.updates.join(&filename);
     download_verified(
@@ -97,21 +95,9 @@ pub fn apply(paths: &AppPaths, update: &AppUpdateInfo) -> Result<PathBuf, String
         "下载程序更新",
         |_| {},
     )?;
-    let current = std::env::current_exe().map_err(|e| format!("读取当前 EXE 失败: {e}"))?;
-    let backup = paths.updates.join(format!("previous-{APP_VERSION}.exe"));
-    if !backup.exists() {
-        fs::copy(&current, &backup).map_err(|e| format!("备份当前 EXE 失败: {e}"))?;
-        write_json_atomic(
-            &paths.updates.join("previous.json"),
-            &serde_json::json!({
-                "version": APP_VERSION,
-                "path": backup,
-                "sha256": sha256_file(&backup)?,
-            }),
-        )?;
-    }
     self_replace::self_replace(&downloaded).map_err(|e| format!("替换当前 EXE 失败: {e}"))?;
-    Ok(backup)
+    let _ = fs::remove_file(&downloaded);
+    Ok(())
 }
 
 #[cfg(test)]

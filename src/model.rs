@@ -176,11 +176,41 @@ pub struct InstallRecord {
     pub game_name: String,
     pub exe: PathBuf,
     pub installed_at_ms: u64,
+    #[serde(default = "default_true")]
+    pub complete: bool,
     pub upstream_tag: String,
     pub extras_version: Option<String>,
     pub profile: String,
     pub proxy_file: String,
     pub files: Vec<ManagedFile>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_install_record_defaults_to_complete() {
+        let record: InstallRecord = serde_json::from_str(
+            r#"{
+                "schema": 2,
+                "game_name": "Test",
+                "exe": "Test.exe",
+                "installed_at_ms": 1,
+                "upstream_tag": "1.12.2",
+                "extras_version": "extras-v1",
+                "profile": "test",
+                "proxy_file": "dxgi.dll",
+                "files": []
+            }"#,
+        )
+        .unwrap();
+        assert!(record.complete);
+    }
 }
 
 #[derive(Debug, Clone)]
