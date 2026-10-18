@@ -893,7 +893,7 @@ impl App {
             } else if self.checking_updates {
                 "检查中…"
             } else if download_needed {
-                "可更新"
+                "下载主包"
             } else {
                 "检查更新"
             };
@@ -3674,7 +3674,7 @@ mod tests {
                     })
                     .collect::<Vec<_>>()
             );
-            for label in ["可更新", "更新到此游戏  →"] {
+            for label in ["下载主包", "更新到此游戏  →"] {
                 let output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
                 let pos = output
                     .shapes
@@ -3706,7 +3706,7 @@ mod tests {
                     .drop_without_applying_deltas();
                 }
                 assert_eq!(app.selected_game, Some(1));
-                if label == "可更新" {
+                if label == "下载主包" {
                     assert!(app.upstream_download_busy);
                     assert!(
                         matches!(commands.try_recv(), Ok(Command::DownloadUpstream(release)) if release.tag == "v1.13.0")

@@ -345,6 +345,7 @@ pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<Maintenanc
 
 pub fn cleanup_installer_files(paths: &AppPaths) -> Result<(), String> {
     clear_staging(paths)?;
+    cleanup_self_delete_artifacts()?;
     for path in [
         paths.cache.clone(),
         paths.legacy_backups.clone(),
@@ -374,6 +375,34 @@ pub fn cleanup_installer_files(paths: &AppPaths) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn cleanup_self_delete_artifacts() -> Result<(), String> {
+    let exe = std::env::current_exe().map_err(|e| format!("读取当前程序路径失败: {e}"))?;
+    let Some(dir) = exe.parent() else {
+        return Ok(());
+    };
+    let Some(exe_name) = exe.file_name().and_then(|name| name.to_str()) else {
+        return Ok(());
+    };
+    for entry in fs::read_dir(dir)
+        .map_err(|e| format!("读取程序目录 {} 失败: {e}", dir.display()))?
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if is_self_delete_artifact(&name, exe_name) {
+            remove_tree_safely(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+fn is_self_delete_artifact(name: &str, exe_name: &str) -> bool {
+    let stem = exe_name
+        .strip_suffix(".exe")
+        .or_else(|| exe_name.strip_suffix(".EXE"))
+        .unwrap_or(exe_name);
+    name.starts_with(&format!(".{stem}.")) && name.ends_with(".__selfdelete__.exe")
 }
 
 pub fn clear_staging(paths: &AppPaths) -> Result<usize, String> {
@@ -787,6 +816,22 @@ mod tests {
             "original"
         );
         fs::remove_dir_all(game).unwrap();
+    }
+
+    #[test]
+    fn recognizes_only_installer_self_delete_artifacts() {
+        assert!(is_self_delete_artifact(
+            ".OptiScalerNR.abc.__selfdelete__.exe",
+            "OptiScalerNR.exe"
+        ));
+        assert!(!is_self_delete_artifact(
+            ".Other.abc.__selfdelete__.exe",
+            "OptiScalerNR.exe"
+        ));
+        assert!(!is_self_delete_artifact(
+            "OptiScalerNR.abc.__selfdelete__.exe",
+            "OptiScalerNR.exe"
+        ));
     }
 
     #[test]
