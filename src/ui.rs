@@ -119,6 +119,7 @@ pub struct App {
     upstream: Option<UpstreamRelease>,
     checking_updates: bool,
     upstream_error: Option<String>,
+    last_update_check: Option<String>,
     app_update: Option<AppUpdateInfo>,
     screen: Screen,
     page: Page,
@@ -164,6 +165,7 @@ impl App {
             upstream,
             checking_updates: false,
             upstream_error: None,
+            last_update_check: None,
             app_update: None,
             screen: Screen::Select,
             page: Page::Install,
@@ -218,6 +220,10 @@ impl App {
                         Ok(None) => "安装器：已是最新版本".into(),
                         Err(_) => "安装器：更新检查失败".into(),
                     };
+                    let component_status = match &upstream {
+                        Ok(release) => format!("组件主包：最新 {}", release.tag),
+                        Err(error) => format!("组件主包：检查失败（{error}）"),
+                    };
                     match upstream {
                         Ok(release) => {
                             self.upstream_error = None;
@@ -263,6 +269,14 @@ impl App {
                             "主包组件与安装器均使用已验签缓存（非实时结果）；更新源暂不可用：{warning}"
                         );
                     }
+                    self.last_update_check = Some(format!(
+                        "{component_status}；{installer_status}{}",
+                        if self.upstream_error.is_some() {
+                            "（使用已验签缓存）"
+                        } else {
+                            ""
+                        }
+                    ));
                 }
                 Event::Progress(progress) => self.progress = progress,
                 Event::Installed(result) => match result {
@@ -378,6 +392,7 @@ impl App {
         if !self.checking_updates {
             self.checking_updates = true;
             self.status = "正在检查主包组件和安装器更新…".into();
+            self.last_update_check = Some("正在检查组件主包和安装器版本…".into());
             let _ = self
                 .sender
                 .send(Command::CheckUpdates(self.settings.clone(), force));
@@ -1456,11 +1471,28 @@ impl App {
                         }
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ghost_button(ui, "立即检查更新").clicked() {
+                        let label = if self.checking_updates {
+                            "检查中…"
+                        } else {
+                            "检查全部更新"
+                        };
+                        let response = ui
+                            .add_enabled_ui(!self.checking_updates, |ui| ghost_button(ui, label))
+                            .inner;
+                        if response.clicked() {
                             self.check_updates(true);
                         }
+                        response.on_hover_text("同时检查上游组件主包和安装器自身版本");
                     });
                 });
+                if let Some(result) = &self.last_update_check {
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new(result)
+                            .size(10.5)
+                            .color(if self.checking_updates { CYAN } else { TEXT2 }),
+                    );
+                }
                 if let Some(update) = &self.app_update {
                     ui.add_space(10.0);
                     ui.separator();
@@ -3195,6 +3227,7 @@ mod tests {
                 upstream: None,
                 checking_updates: false,
                 upstream_error: None,
+                last_update_check: None,
                 app_update: None,
                 screen: Screen::Select,
                 page: Page::Install,
@@ -3518,6 +3551,17 @@ mod tests {
                     "主包组件：更新检查失败"
                 }));
                 assert!(app.status.contains(if installer_ok {
+                    "安装器：已是最新版本"
+                } else {
+                    "安装器：更新检查失败"
+                }));
+                let check = app.last_update_check.as_deref().unwrap();
+                assert!(check.contains(if component_ok {
+                    "组件主包：最新 v1.13.0"
+                } else {
+                    "组件主包：检查失败"
+                }));
+                assert!(check.contains(if installer_ok {
                     "安装器：已是最新版本"
                 } else {
                     "安装器：更新检查失败"
