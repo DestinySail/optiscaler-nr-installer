@@ -1045,7 +1045,7 @@ impl App {
                 CardIcon::Download,
                 "组件主包",
                 &up_value,
-                "部署游戏时下载",
+                "上游当前最新版本 · 部署时下载",
                 VIOLET,
             );
             info_card(
