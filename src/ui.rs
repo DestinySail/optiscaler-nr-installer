@@ -183,7 +183,7 @@ impl App {
             receiver,
         };
         app.refresh_games();
-        app.check_updates(false);
+        app.check_updates(true);
         app
     }
 
