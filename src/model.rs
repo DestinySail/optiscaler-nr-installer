@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 pub const APP_NAME: &str = "OptiScaler NR Installer";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const UPSTREAM_REPO: &str = "TheAutomatic/dlss-5-amd-project";
-pub const FIXED_PROFILE: &str = "政宗 SAMA OptiScaler NR + Mochizuki + Intel XeFG";
+pub const FIXED_PROFILE: &str = "OptiScaler NR + Mochizuki 后端 + Intel XeFG";
 pub const DEFAULT_RELEASE_REPO: &str = "DestinySail/optiscaler-nr-installer";
 pub const DEFAULT_EXTRAS_VERSION: &str = "extras-v1";
 pub const DEFAULT_EXTRAS_URL: &str = "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/extras-v1/extras-v1.zip";

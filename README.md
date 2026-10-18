@@ -5,7 +5,7 @@
 
 用于 Windows x64 的 Rust 安装器，安装一套固定组合：
 
-**政宗 SAMA OptiScaler NR + Mochizuki 后端 + Intel XeFG（上游 README 方案 1）**
+**OptiScaler NR + Mochizuki 后端 + Intel XeFG**
 
 程序负责检测硬件和游戏、下载并校验组件、清理旧注入、合并配置以及后续检查、修复、更新和卸载。正常流程只有“选择游戏 → 安装进度 → 完成”。
 
