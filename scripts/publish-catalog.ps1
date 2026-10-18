@@ -63,6 +63,16 @@ if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or $asse
     -not $asset.browser_download_url.StartsWith('https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/')) {
     throw 'Upstream package has no valid source, size or SHA-256 digest'
 }
+$reframework = Read-GitHubJson 'repos/praydog/REFramework-nightly/releases/latest'
+if ($reframework.draft -or $reframework.prerelease -or $reframework.tag_name -notmatch '^nightly-') {
+    throw 'REFramework nightly release is not stable'
+}
+$refAsset = @($reframework.assets | Where-Object name -EQ 'REFramework.zip')
+if ($refAsset.Count -ne 1 -or $refAsset[0].digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or
+    $refAsset[0].size -le 0 -or
+    -not $refAsset[0].browser_download_url.StartsWith('https://github.com/praydog/REFramework-nightly/releases/download/')) {
+    throw 'REFramework package has no valid source, size or SHA-256 digest'
+}
 $catalog = [ordered]@{
     schema = 1
     installer = $installer
@@ -77,6 +87,20 @@ $catalog = [ordered]@{
             sha256 = $asset.digest.Substring(7).ToLowerInvariant()
             url = $asset.browser_download_url
             updated_at = $asset.updated_at
+        }
+        checked_at_ms = 0
+    }
+    reframework = [ordered]@{
+        release_id = $reframework.id
+        tag = $reframework.tag_name
+        published_at = $reframework.published_at
+        asset = [ordered]@{
+            id = $refAsset[0].id
+            name = $refAsset[0].name
+            size = $refAsset[0].size
+            sha256 = $refAsset[0].digest.Substring(7).ToLowerInvariant()
+            url = $refAsset[0].browser_download_url
+            updated_at = $refAsset[0].updated_at
         }
         checked_at_ms = 0
     }
@@ -98,4 +122,4 @@ if (-not $unchanged) {
 }
 & $MinisignExe -V -P $publicKey -m $catalogPath -x "$catalogPath.minisig"
 if ($LASTEXITCODE -ne 0) { throw 'Published catalog signature verification failed' }
-Write-Host "Catalog ready: installer $($installer.version), upstream $($upstream.tag_name)"
+Write-Host "Catalog ready: installer $($installer.version), upstream $($upstream.tag_name), REFramework $($reframework.tag_name)"

@@ -11,6 +11,7 @@ use crate::util::{now_ms, read_json, safe_relative, write_json_atomic};
 
 const CHECK_INTERVAL_MS: u64 = 60 * 60 * 1000;
 const RETRY_INTERVAL_MS: u64 = 5 * 60 * 1000;
+const REFRAMEWORK_REPO: &str = "praydog/REFramework-nightly";
 const PUBLIC_KEY: &str = match option_env!("NR_UPDATE_PUBKEY") {
     Some(key) if !key.is_empty() => key,
     _ => "RWTZaaq8Jlp7qRSoKK4tDYfpAslM5P/LTvHSSTox80Pzx0LDZUisoTgH",
@@ -21,6 +22,8 @@ pub struct Catalog {
     schema: u32,
     pub installer: UpdateManifest,
     pub upstream: UpstreamRelease,
+    #[serde(default)]
+    pub reframework: Option<UpstreamRelease>,
     #[serde(skip)]
     pub warning: Option<String>,
 }
@@ -202,6 +205,24 @@ fn verify(
     {
         return Err("静态清单的主包来源、文件名、版本或哈希无效".into());
     }
+    if let Some(reframework) = &catalog.reframework {
+        let asset = &reframework.asset;
+        let name = safe_relative(std::path::Path::new(&asset.name))?;
+        if name.components().count() != 1
+            || asset.name != "REFramework.zip"
+            || !reframework.tag.starts_with("nightly-")
+            || reframework.release_id == 0
+            || asset.id == 0
+            || asset.size == 0
+            || asset.sha256.len() != 64
+            || !asset.sha256.chars().all(|c| c.is_ascii_hexdigit())
+            || !asset.url.starts_with(&format!(
+                "https://github.com/{REFRAMEWORK_REPO}/releases/download/"
+            ))
+        {
+            return Err("静态清单的 REFramework 来源、文件名或哈希无效".into());
+        }
+    }
     Ok(catalog)
 }
 
@@ -273,11 +294,15 @@ mod tests {
         let catalog = verify(PAYLOAD.as_bytes(), SIGNATURE, &settings, TEST_KEY).unwrap();
         assert_eq!(catalog.upstream.tag, "v1.13.0");
         assert_eq!(
+            catalog.reframework.as_ref().unwrap().asset.sha256,
+            "27376e1da177ddcde9c46b3541bdc6fa1ad54a11d0cab9f7782eff0481455e94"
+        );
+        assert_eq!(
             crate::self_update::available(&catalog.installer)
                 .unwrap()
                 .unwrap()
                 .version,
-            "0.2.0"
+            "0.3.0"
         );
         assert!(
             verify(

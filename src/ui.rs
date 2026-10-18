@@ -575,8 +575,7 @@ impl App {
                             egui::ProgressBar::new(
                                 self.app_update_progress.fraction.unwrap_or(0.0),
                             )
-                            .show_percentage()
-                            .animate(true),
+                            .show_percentage(),
                         );
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
@@ -1363,6 +1362,17 @@ impl App {
             ) {
                 action = Some(Action::Update);
             }
+            if maintenance_card(
+                ui,
+                width,
+                MaintIcon::Shield,
+                "安装 REFramework",
+                "为 PRAGMATA 等 RE Engine 游戏安装 dinput8.dll，修复启动后自动关闭。",
+                enabled,
+                None,
+            ) {
+                action = Some(Action::InstallReframework);
+            }
         });
         ui.add_space(gap);
         ui.horizontal(|ui| {
@@ -1857,6 +1867,9 @@ impl App {
                     "将删除本项目受管的注入文件。当前安装器不保留旧文件备份，请先退出游戏。"
                 }
                 Action::DisableFrameGen => "将修改游戏目录中的配置，关闭 XeFG 插帧。请先退出游戏。",
+                Action::InstallReframework => {
+                    "将从 praydog/REFramework-nightly 下载最新版本，并覆盖游戏目录中的 dinput8.dll。请先退出游戏。"
+                }
                 _ => {
                     "将重新部署固定方案；同名文件会直接覆盖。当前安装器不保留旧文件备份，请先退出游戏。"
                 }
@@ -2043,6 +2056,11 @@ fn spawn_worker(paths: Result<AppPaths, String>) -> (Sender<Command>, Receiver<E
                         Action::Check => install::check_install(paths, &game),
                         Action::Uninstall => install::uninstall(paths, &game),
                         Action::DisableFrameGen => install::disable_frame_gen(paths, &game),
+                        Action::InstallReframework => {
+                            crate::reframework::install(paths, &settings, &game, |progress| {
+                                let _ = event_tx.send(Event::Status(progress.detail));
+                            })
+                        }
                     };
                     let _ = event_tx.send(Event::Maintained { action, result });
                 }

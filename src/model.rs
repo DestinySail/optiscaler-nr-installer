@@ -217,6 +217,7 @@ pub enum Action {
     Update,
     Uninstall,
     DisableFrameGen,
+    InstallReframework,
 }
 
 impl Action {
@@ -227,6 +228,7 @@ impl Action {
             Self::Update => "更新",
             Self::Uninstall => "卸载",
             Self::DisableFrameGen => "关闭插帧",
+            Self::InstallReframework => "安装 REFramework",
         }
     }
 }

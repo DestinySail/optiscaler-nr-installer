@@ -17,6 +17,7 @@
 | Daniel 权重来源 | [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD) | 许可见上游；仅维护存档 |
 | AMD FidelityFX | [GPUOpen-LibrariesAndSDKs/FidelityFX-SDK](https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK) | 以随包许可证为准 |
 | Intel XeSS | [intel/xess](https://github.com/intel/xess) | 以随包许可证为准 |
+| REFramework nightly | [praydog/REFramework-nightly](https://github.com/praydog/REFramework-nightly) | 许可见上游；安装器只部署 `dinput8.dll` |
 
 `nvngx_dlssnr.dll` 是 NVIDIA 专有运行库，没有对应的开源仓库。它只存在于维护存档，不被安装器部署。NVIDIA 运行库和由它生成的模型权重是否允许再分发，需要在发布资源前确认。
 

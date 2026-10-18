@@ -106,6 +106,10 @@ cargo build --release --locked
 
 启动检查始终绕过清单缓存并刷新一次；网络失败时仍回退到已验证的签名缓存。游戏运行期间的手动检查继续遵守冷却时间。
 
+## REFramework 修复
+
+维护页的“安装 REFramework”只用于 RE Engine 游戏。它从 `praydog/REFramework-nightly` 最新 Release 读取 `REFramework.zip` 的大小和 SHA-256，下载并解压后只复制根目录的 `dinput8.dll` 到游戏 EXE 所在目录。记录保存在游戏的 `reframework.json`，卸载时仅删除哈希仍匹配的受管 DLL；被后续修改的 DLL 会保留。
+
 ## 安装器发布
 
 ```powershell

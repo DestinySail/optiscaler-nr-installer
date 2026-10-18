@@ -120,18 +120,18 @@ mod tests {
             manifest,
             signature,
             TEST_PUBLIC_KEY,
-            "0.2.0",
+            "0.3.0",
         )
         .unwrap()
         .unwrap();
-        assert_eq!(parsed.version, "0.2.0");
+        assert_eq!(parsed.version, "0.3.0");
         assert!(
             verify_manifest(
                 "DestinySail/optiscaler-nr-installer",
                 manifest,
                 signature,
                 TEST_PUBLIC_KEY,
-                "0.3.0",
+                "0.4.0",
             )
             .is_err()
         );
@@ -141,7 +141,7 @@ mod tests {
                 manifest,
                 signature,
                 TEST_PUBLIC_KEY,
-                "0.2.0",
+                "0.3.0",
             )
             .is_err()
         );
@@ -154,7 +154,7 @@ mod tests {
                 &tampered,
                 signature,
                 TEST_PUBLIC_KEY,
-                "0.2.0",
+                "0.3.0",
             )
             .is_err()
         );

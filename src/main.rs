@@ -9,6 +9,7 @@ mod ini;
 mod install;
 mod model;
 mod pe;
+mod reframework;
 mod self_update;
 mod single_instance;
 mod ui;
@@ -79,6 +80,7 @@ fn run() -> Result<(), String> {
         ("--repair", model::Action::Repair),
         ("--uninstall", model::Action::Uninstall),
         ("--disable-fg", model::Action::DisableFrameGen),
+        ("--reframework", model::Action::InstallReframework),
     ] {
         if let Some(index) = args.iter().position(|arg| arg == flag) {
             let exe = args
@@ -194,13 +196,15 @@ fn headless_maintenance(
 ) -> Result<(), String> {
     let paths = model::AppPaths::discover()?;
     let game = games::inspect_manual(exe)?;
+    let mut settings = util::read_json::<model::Settings>(&paths.settings).unwrap_or_default();
     let report = match action {
         model::Action::Check => install::check_install(&paths, &game)?,
         model::Action::Uninstall => install::uninstall(&paths, &game)?,
         model::Action::DisableFrameGen => install::disable_frame_gen(&paths, &game)?,
+        model::Action::InstallReframework => {
+            reframework::install(&paths, &settings, &game, |_| {})?
+        }
         model::Action::Repair | model::Action::Update => {
-            let mut settings =
-                util::read_json::<model::Settings>(&paths.settings).unwrap_or_default();
             if let Some(index) = args.iter().position(|arg| arg == "--upstream") {
                 settings.local_upstream_source = Some(std::path::PathBuf::from(
                     args.get(index + 1)

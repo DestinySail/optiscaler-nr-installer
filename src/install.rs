@@ -337,6 +337,9 @@ pub fn uninstall(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceReport,
             "游戏已恢复到无本项目注入的状态，未保留旧版本备份".to_string(),
         ],
     };
+    if let Some(message) = crate::reframework::remove_managed(paths, game)? {
+        report.lines.push(message);
+    }
     if let Err(error) = cleanup_installer_files(paths) {
         report
             .lines
@@ -732,7 +735,7 @@ fn is_reparse(metadata: &fs::Metadata) -> bool {
     }
 }
 
-fn copy_replacing(source: &Path, target: &Path) -> Result<(), String> {
+pub(crate) fn copy_replacing(source: &Path, target: &Path) -> Result<(), String> {
     if let Some(parent) = target.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建 {} 失败: {e}", parent.display()))?;
     }
