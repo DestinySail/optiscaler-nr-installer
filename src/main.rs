@@ -16,7 +16,8 @@ mod updates;
 mod util;
 
 fn main() {
-    let _instance = match single_instance::acquire() {
+    let restarting = std::env::args().any(|arg| arg == "--restart");
+    let _instance = match acquire_instance(restarting) {
         Ok(guard) => guard,
         Err(error) => {
             show_fatal(&error);
@@ -26,6 +27,23 @@ fn main() {
     if let Err(error) = run() {
         show_fatal(&error);
         std::process::exit(1);
+    }
+}
+
+fn acquire_instance(restarting: bool) -> Result<single_instance::InstanceGuard, String> {
+    if !restarting {
+        return single_instance::acquire();
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match single_instance::acquire() {
+            Ok(guard) => return Ok(guard),
+            Err(error) if std::time::Instant::now() < deadline => {
+                let _ = error;
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(error) => return Err(error),
+        }
     }
 }
 

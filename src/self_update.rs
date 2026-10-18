@@ -3,7 +3,7 @@ use std::fs;
 use semver::Version;
 use serde::{Deserialize, Serialize};
 
-use crate::model::{APP_VERSION, AppPaths, Settings};
+use crate::model::{APP_VERSION, AppPaths, Progress, Settings};
 use crate::updates::download_verified;
 
 #[derive(Debug, Clone)]
@@ -84,7 +84,11 @@ pub fn validate_manifest(repo: &str, manifest: &UpdateManifest) -> Result<(), St
     Ok(())
 }
 
-pub fn apply(paths: &AppPaths, update: &AppUpdateInfo) -> Result<(), String> {
+pub fn apply(
+    paths: &AppPaths,
+    update: &AppUpdateInfo,
+    mut progress: impl FnMut(Progress),
+) -> Result<(), String> {
     let filename = format!("OptiScalerNR-{}.exe", update.version);
     let downloaded = paths.updates.join(&filename);
     download_verified(
@@ -93,8 +97,9 @@ pub fn apply(paths: &AppPaths, update: &AppUpdateInfo) -> Result<(), String> {
         &update.sha256,
         None,
         "下载程序更新",
-        |_| {},
+        &mut progress,
     )?;
+    progress(Progress::new("安装更新", "正在替换安装器", Some(1.0)));
     self_replace::self_replace(&downloaded).map_err(|e| format!("替换当前 EXE 失败: {e}"))?;
     let _ = fs::remove_file(&downloaded);
     Ok(())

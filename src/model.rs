@@ -63,8 +63,6 @@ pub struct Settings {
     pub local_upstream_source: Option<PathBuf>,
     #[serde(default)]
     pub local_extras_source: Option<PathBuf>,
-    #[serde(default)]
-    pub auto_apply_app_update: bool,
 }
 
 impl Default for Settings {
@@ -87,7 +85,6 @@ impl Default for Settings {
             extras,
             local_upstream_source: None,
             local_extras_source: None,
-            auto_apply_app_update: false,
         }
     }
 }

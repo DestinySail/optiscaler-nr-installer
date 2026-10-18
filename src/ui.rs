@@ -74,6 +74,7 @@ enum Event {
         action: Action,
         result: Result<MaintenanceReport, String>,
     },
+    AppUpdateProgress(Progress),
     AppUpdateApplied(Result<(), String>),
     Status(String),
 }
@@ -90,6 +91,14 @@ enum Page {
     Install,
     Maintain,
     Settings,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppUpdatePhase {
+    Prompt,
+    Downloading,
+    Ready,
+    Failed,
 }
 
 #[derive(Clone, Copy)]
@@ -122,7 +131,10 @@ pub struct App {
     maintenance_busy: bool,
     pending_maintenance: Option<(GameInfo, Action)>,
     app_update_busy: bool,
-    close_after_update: bool,
+    app_update_phase: Option<AppUpdatePhase>,
+    app_update_progress: Progress,
+    app_update_error: Option<String>,
+    update_notified_version: Option<String>,
     last_maintenance: Option<MaintenanceReport>,
     sender: Sender<Command>,
     receiver: Receiver<Event>,
@@ -165,7 +177,10 @@ impl App {
             maintenance_busy: false,
             pending_maintenance: None,
             app_update_busy: false,
-            close_after_update: false,
+            app_update_phase: None,
+            app_update_progress: Progress::new("安装器更新", "准备下载", None),
+            app_update_error: None,
+            update_notified_version: None,
             last_maintenance: None,
             sender,
             receiver,
@@ -175,7 +190,7 @@ impl App {
         app
     }
 
-    fn drain_events(&mut self, ctx: &egui::Context) {
+    fn drain_events(&mut self) {
         while let Ok(event) = self.receiver.try_recv() {
             match event {
                 Event::Gpus(result) => match result {
@@ -228,6 +243,14 @@ impl App {
                     match app_update {
                         Ok(update) => {
                             self.app_update = update;
+                            if let Some(update) = &self.app_update
+                                && self.update_notified_version.as_deref()
+                                    != Some(update.version.as_str())
+                            {
+                                self.update_notified_version = Some(update.version.clone());
+                                self.app_update_phase = Some(AppUpdatePhase::Prompt);
+                                self.app_update_error = None;
+                            }
                         }
                         Err(error) => {
                             self.status.push_str(&format!("；安装器详情：{error}"));
@@ -276,44 +299,24 @@ impl App {
                     });
                     self.refresh_installed_tags();
                 }
+                Event::AppUpdateProgress(progress) => {
+                    self.app_update_progress = progress;
+                }
                 Event::AppUpdateApplied(result) => {
                     self.app_update_busy = false;
                     match result {
                         Ok(()) => {
-                            self.last_maintenance = Some(MaintenanceReport {
-                                title: "安装器更新已写入".to_string(),
-                                lines: vec![
-                                    "关闭本窗口后重新打开即可使用新版本。".to_string(),
-                                    "更新下载文件已清理，未保留旧版安装器。".to_string(),
-                                ],
-                            });
-                            self.close_after_update = true;
+                            self.app_update_phase = Some(AppUpdatePhase::Ready);
+                            self.app_update_error = None;
                         }
                         Err(error) => {
-                            self.app_update = None;
-                            self.last_maintenance = Some(MaintenanceReport {
-                                title: "安装器更新失败".to_string(),
-                                lines: vec![error],
-                            });
+                            self.app_update_phase = Some(AppUpdatePhase::Failed);
+                            self.app_update_error = Some(error);
                         }
                     }
                 }
                 Event::Status(status) => self.status = status,
             }
-        }
-        if self.settings.auto_apply_app_update
-            && self.screen != Screen::Installing
-            && !self.maintenance_busy
-            && self.pending_maintenance.is_none()
-            && !self.app_update_busy
-            && !self.upstream_download_busy
-            && let Some(update) = self.app_update.take()
-        {
-            self.app_update_busy = true;
-            let _ = self.sender.send(Command::ApplyAppUpdate(update));
-        }
-        if self.close_after_update {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
 
@@ -483,6 +486,161 @@ impl App {
             settings: self.settings.clone(),
             upstream: self.upstream.clone(),
         });
+    }
+
+    fn start_app_update(&mut self) {
+        let Some(update) = self.app_update.clone() else {
+            return;
+        };
+        self.app_update_busy = true;
+        self.app_update_phase = Some(AppUpdatePhase::Downloading);
+        self.app_update_error = None;
+        self.app_update_progress = Progress::new("安装器更新", "准备下载", Some(0.0));
+        let _ = self.sender.send(Command::ApplyAppUpdate(update));
+    }
+
+    fn app_update_modal(&mut self, ctx: &egui::Context) {
+        let Some(update) = self.app_update.clone() else {
+            return;
+        };
+        let Some(phase) = self.app_update_phase else {
+            return;
+        };
+        let mut dismiss = false;
+        let mut download = false;
+        let mut restart = false;
+        let modal = egui::Modal::new(egui::Id::unique("app-update-dialog"))
+            .frame(
+                egui::Frame::NONE
+                    .fill(CARD)
+                    .stroke(egui::Stroke::new(1.0, LINE))
+                    .corner_radius(12.0)
+                    .inner_margin(egui::Margin::same(DIALOG_PADDING)),
+            )
+            .show(ctx, |ui| {
+                ui.set_width(
+                    DIALOG_WIDTH.min(ctx.content_rect().width() - 2.0 * DIALOG_PADDING as f32),
+                );
+                ui.label(
+                    egui::RichText::new("安装器更新")
+                        .font(bold(20.0))
+                        .color(TEXT),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    egui::RichText::new(format!("发现新版本 {}", update.version))
+                        .size(12.0)
+                        .color(CYAN),
+                );
+                ui.add_space(6.0);
+                if !update.notes.is_empty() {
+                    ui.label(
+                        egui::RichText::new(truncate(&update.notes, 240))
+                            .size(10.5)
+                            .color(TEXT2),
+                    );
+                }
+                ui.add_space(16.0);
+                match phase {
+                    AppUpdatePhase::Prompt => {
+                        ui.label(
+                            egui::RichText::new("更新会下载并校验新安装器，完成后需要重新启动。")
+                                .size(11.0)
+                                .color(TEXT2),
+                        );
+                        ui.add_space(18.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if primary_button(ui, "下载更新", true, 132.0) {
+                                        download = true;
+                                    }
+                                    if secondary_button(ui, "稍后", 104.0).clicked() {
+                                        dismiss = true;
+                                    }
+                                },
+                            );
+                        });
+                    }
+                    AppUpdatePhase::Downloading => {
+                        ui.add(
+                            egui::ProgressBar::new(
+                                self.app_update_progress.fraction.unwrap_or(0.0),
+                            )
+                            .show_percentage()
+                            .animate(true),
+                        );
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(
+                                egui::RichText::new(&self.app_update_progress.detail)
+                                    .size(10.5)
+                                    .color(TEXT2),
+                            );
+                        });
+                    }
+                    AppUpdatePhase::Ready => {
+                        ui.label(
+                            egui::RichText::new("更新已下载并完成校验。重新启动后使用新版本。")
+                                .size(11.0)
+                                .color(GREEN),
+                        );
+                        ui.add_space(18.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if primary_button(ui, "重新启动", true, 132.0) {
+                                        restart = true;
+                                    }
+                                },
+                            );
+                        });
+                    }
+                    AppUpdatePhase::Failed => {
+                        let error = self.app_update_error.as_deref().unwrap_or("安装器更新失败");
+                        ui.label(egui::RichText::new(error).size(10.5).color(RED));
+                        ui.add_space(18.0);
+                        ui.horizontal(|ui| {
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if primary_button(ui, "重试下载", true, 132.0) {
+                                        download = true;
+                                    }
+                                    if secondary_button(ui, "关闭", 104.0).clicked() {
+                                        dismiss = true;
+                                    }
+                                },
+                            );
+                        });
+                    }
+                }
+            });
+        if restart {
+            let exe = std::env::current_exe()
+                .map_err(|error| format!("读取安装器路径失败: {error}"))
+                .and_then(|exe| {
+                    std::process::Command::new(exe)
+                        .arg("--restart")
+                        .spawn()
+                        .map(|_| ())
+                        .map_err(|error| format!("重新启动安装器失败: {error}"))
+                });
+            match exe {
+                Ok(()) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+                Err(error) => {
+                    self.app_update_phase = Some(AppUpdatePhase::Failed);
+                    self.app_update_error = Some(error);
+                }
+            }
+        } else if download {
+            self.start_app_update();
+        } else if dismiss || modal.should_close() {
+            self.app_update_phase = None;
+        }
     }
 
     fn sidebar(&mut self, ui: &mut egui::Ui) {
@@ -843,19 +1001,6 @@ impl App {
         } else {
             "未检测到受支持的 RDNA4"
         };
-        let up_value = match &self.upstream {
-            Some(release) => format!(
-                "{} · {}",
-                release.tag,
-                if self.upstream_error.is_some() || self.checking_updates {
-                    "缓存"
-                } else {
-                    "Stable"
-                },
-            ),
-            None if self.checking_updates => "检查中…".to_string(),
-            None => "检查失败".to_string(),
-        };
         let download_needed = self.upstream.as_ref().is_some_and(|release| {
             self.paths
                 .as_ref()
@@ -864,6 +1009,21 @@ impl App {
                 .and_then(|path| path.metadata().ok())
                 .is_none_or(|meta| !meta.is_file() || meta.len() != release.asset.size)
         });
+        let up_value = match &self.upstream {
+            Some(release) => format!(
+                "{} · {}",
+                release.tag,
+                if self.upstream_error.is_some() || self.checking_updates {
+                    "缓存"
+                } else if download_needed {
+                    "未下载"
+                } else {
+                    "已校验"
+                },
+            ),
+            None if self.checking_updates => "检查中…".to_string(),
+            None => "检查失败".to_string(),
+        };
         let mut upstream_clicked = false;
 
         let gap = 10.0;
@@ -1386,8 +1546,8 @@ impl App {
                                 )
                                 .clicked()
                             {
-                                self.app_update_busy = true;
-                                let _ = self.sender.send(Command::ApplyAppUpdate(update.clone()));
+                                self.app_update_phase = Some(AppUpdatePhase::Prompt);
+                                self.app_update_error = None;
                             }
                         });
                     });
@@ -1443,7 +1603,6 @@ impl App {
             .ok()
             .map(|paths| paths.root.display().to_string())
             .unwrap_or_else(|| "%LOCALAPPDATA%\\OptiScalerNR".to_string());
-        let mut auto_update = self.draft.auto_apply_app_update;
         let mut pick_main = false;
         let mut pick_extras = false;
         let mut clear_main = false;
@@ -1465,15 +1624,6 @@ impl App {
                                 .color(TEXT2),
                         );
                         ui.label(egui::RichText::new("已锁定").size(9.5).color(CYAN));
-                    },
-                );
-                ui.separator();
-                settings_row(
-                    ui,
-                    "自动应用安装器更新",
-                    "通过签名更新清单校验安装器版本。",
-                    |ui| {
-                        switch(ui, &mut auto_update);
                     },
                 );
                 ui.separator();
@@ -1529,7 +1679,6 @@ impl App {
                     },
                 );
             });
-        self.draft.auto_apply_app_update = auto_update;
         if pick_main {
             self.choose_upstream_source();
         }
@@ -1624,7 +1773,7 @@ impl App {
 impl App {
     fn render(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
-        self.drain_events(&ctx);
+        self.drain_events();
 
         egui::Panel::left("sidebar")
             .exact_size(232.0)
@@ -1822,6 +1971,7 @@ impl App {
                 self.pending_maintenance = None;
             }
         }
+        self.app_update_modal(&ctx);
         ctx.request_repaint_after(Duration::from_millis(120));
     }
 }
@@ -1926,7 +2076,9 @@ fn spawn_worker(paths: Result<AppPaths, String>) -> (Sender<Command>, Receiver<E
                 }
                 Command::ApplyAppUpdate(update) => {
                     let result = match &paths {
-                        Ok(paths) => self_update::apply(paths, &update),
+                        Ok(paths) => self_update::apply(paths, &update, |progress| {
+                            let _ = event_tx.send(Event::AppUpdateProgress(progress));
+                        }),
                         Err(error) => Err(error.clone()),
                     };
                     let _ = event_tx.send(Event::AppUpdateApplied(result));
@@ -2856,67 +3008,6 @@ fn settings_row(
     ui.add_space(14.0);
 }
 
-fn switch(ui: &mut egui::Ui, value: &mut bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(41.0, 23.0), egui::Sense::click());
-    let on = *value;
-    response.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::accesskit::Role::Switch,
-            true,
-            on,
-            "自动应用安装器更新",
-        )
-    });
-    if response.has_focus() {
-        ui.painter().rect_stroke(
-            rect.expand(3.0),
-            14.0,
-            egui::Stroke::new(1.0, CYAN),
-            egui::StrokeKind::Inside,
-        );
-    }
-    ui.painter().rect_filled(
-        rect,
-        11.5,
-        if on {
-            egui::Color32::from_rgb(50, 121, 128)
-        } else {
-            egui::Color32::from_rgb(49, 67, 87)
-        },
-    );
-    ui.painter().rect_stroke(
-        rect,
-        11.5,
-        egui::Stroke::new(
-            1.0,
-            if on {
-                egui::Color32::from_rgb(98, 220, 210)
-            } else {
-                egui::Color32::from_rgb(69, 96, 115)
-            },
-        ),
-        egui::StrokeKind::Inside,
-    );
-    let knob_x = if on {
-        rect.right() - 11.5
-    } else {
-        rect.left() + 11.5
-    };
-    ui.painter().circle_filled(
-        egui::pos2(knob_x, rect.center().y),
-        7.5,
-        if on {
-            egui::Color32::from_rgb(202, 255, 251)
-        } else {
-            egui::Color32::from_rgb(155, 170, 190)
-        },
-    );
-    if response.clicked() {
-        *value = !*value;
-    }
-    response
-}
-
 fn secondary_button(ui: &mut egui::Ui, text: &str, width: f32) -> egui::Response {
     ui.add(
         egui::Button::new(egui::RichText::new(text).size(14.0).color(TEXT2))
@@ -3177,7 +3268,10 @@ mod tests {
                 maintenance_busy: false,
                 pending_maintenance: None,
                 app_update_busy: false,
-                close_after_update: false,
+                app_update_phase: None,
+                app_update_progress: Progress::new("安装器更新", "准备下载", None),
+                app_update_error: None,
+                update_notified_version: None,
                 last_maintenance: None,
                 sender,
                 receiver,
@@ -3196,11 +3290,11 @@ mod tests {
         events
             .send(Event::Games(vec![other, selected.clone()]))
             .unwrap();
-        app.drain_events(&egui::Context::default());
+        app.drain_events();
         assert_eq!(app.selected_game, Some(1));
         assert_eq!(app.selected_game().unwrap().exe, selected.exe);
         events.send(Event::Games(vec![])).unwrap();
-        app.drain_events(&egui::Context::default());
+        app.drain_events();
         assert!(app.selected_game().is_none());
     }
 
@@ -3367,7 +3461,7 @@ mod tests {
                 warning: None,
             })
             .unwrap();
-        app.drain_events(&egui::Context::default());
+        app.drain_events();
         assert!(!app.checking_updates);
         assert!(app.upstream_error.is_none());
         app.check_updates(true);
@@ -3378,7 +3472,7 @@ mod tests {
                 warning: None,
             })
             .unwrap();
-        app.drain_events(&egui::Context::default());
+        app.drain_events();
         assert!(!app.checking_updates);
         assert!(app.upstream_error.is_some());
         assert_eq!(app.upstream.as_ref().unwrap().tag, "v1.13.0");
@@ -3438,7 +3532,7 @@ mod tests {
             }
         }
         events.send(Event::Games(vec![])).unwrap();
-        app.drain_events(&ctx);
+        app.drain_events();
         assert!(!app.scanning_games);
         let output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
         assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text.contains("没有自动发现游戏"))));
@@ -3447,7 +3541,7 @@ mod tests {
         assert!(app.scanning_games);
         let (other, _, _) = fixture();
         events.send(Event::Games(other.games)).unwrap();
-        app.drain_events(&ctx);
+        app.drain_events();
         assert!(!app.scanning_games);
         assert_eq!(app.selected_game, Some(0));
         assert_eq!(app.games.len(), 1);
@@ -3477,7 +3571,7 @@ mod tests {
                         },
                     })
                     .unwrap();
-                app.drain_events(&egui::Context::default());
+                app.drain_events();
                 assert!(app.status.contains(if component_ok {
                     "主包组件：最新 v1.13.0"
                 } else {
@@ -3518,7 +3612,7 @@ mod tests {
                 warning: Some("network unavailable".into()),
             })
             .unwrap();
-        app.drain_events(&egui::Context::default());
+        app.drain_events();
         assert!(app.upstream_error.is_some());
         assert!(app.status.contains("主包组件与安装器"));
         assert!(app.status.contains("非实时结果"));
@@ -3731,31 +3825,68 @@ mod tests {
     }
 
     #[test]
-    fn automatic_update_waits_for_install_and_is_sent_once() {
-        let (mut app, _, commands) = fixture();
-        app.settings.auto_apply_app_update = true;
-        app.app_update = Some(AppUpdateInfo {
-            version: "99.0.0".into(),
-            exe_url: String::new(),
-            sha256: String::new(),
-            notes: String::new(),
-        });
-        app.screen = Screen::Installing;
+    fn app_update_waits_for_the_dialog_button() {
+        let (mut app, events, commands) = fixture();
+        events
+            .send(Event::Checked {
+                upstream: Err("not used".into()),
+                app_update: Ok(Some(AppUpdateInfo {
+                    version: "99.0.0".into(),
+                    exe_url: String::new(),
+                    sha256: String::new(),
+                    notes: "Update notes".into(),
+                })),
+                warning: None,
+            })
+            .unwrap();
+        app.drain_events();
+        assert_eq!(app.app_update_phase, Some(AppUpdatePhase::Prompt));
+        assert!(commands.try_recv().is_err());
         let ctx = egui::Context::default();
-        app.drain_events(&ctx);
-        assert!(commands.try_recv().is_err());
-        app.screen = Screen::Select;
-        app.maintenance_busy = true;
-        app.drain_events(&ctx);
-        assert!(commands.try_recv().is_err());
-        app.maintenance_busy = false;
-        app.drain_events(&ctx);
+        install_fonts(&ctx);
+        apply_style(&ctx);
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 650.0),
+            )),
+            ..Default::default()
+        };
+        let first = ctx.run_ui(input(), |ui| app.render(ui));
+        first.drop_without_applying_deltas();
+        let output = ctx.run_ui(input(), |ui| app.render(ui));
+        let has_download = output.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "下载更新")
+        });
+        output.drop_without_applying_deltas();
+        assert!(has_download);
+
+        app.start_app_update();
+        assert_eq!(app.app_update_phase, Some(AppUpdatePhase::Downloading));
         assert!(matches!(
             commands.try_recv(),
-            Ok(Command::ApplyAppUpdate(_))
+            Ok(Command::ApplyAppUpdate(update)) if update.version == "99.0.0"
         ));
-        app.drain_events(&ctx);
-        assert!(commands.try_recv().is_err());
+
+        events
+            .send(Event::AppUpdateProgress(Progress::new(
+                "下载程序更新",
+                "已下载 50%",
+                Some(0.5),
+            )))
+            .unwrap();
+        events.send(Event::AppUpdateApplied(Ok(()))).unwrap();
+        app.drain_events();
+        assert_eq!(app.app_update_phase, Some(AppUpdatePhase::Ready));
+        assert_eq!(app.app_update_progress.fraction, Some(0.5));
+        let first = ctx.run_ui(input(), |ui| app.render(ui));
+        first.drop_without_applying_deltas();
+        let output = ctx.run_ui(input(), |ui| app.render(ui));
+        let has_restart = output.shapes.iter().any(|shape| {
+            matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "重新启动")
+        });
+        output.drop_without_applying_deltas();
+        assert!(has_restart);
     }
 
     #[test]
