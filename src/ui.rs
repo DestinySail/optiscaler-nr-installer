@@ -649,6 +649,61 @@ impl App {
         }
     }
 
+    fn maintenance_report_modal(&mut self, ctx: &egui::Context) {
+        if self.app_update_phase.is_some() {
+            return;
+        }
+        let Some(report) = self.last_maintenance.clone() else {
+            return;
+        };
+        let failed = report.title.contains("失败");
+        let mut close = false;
+        let modal = egui::Modal::new(egui::Id::unique("maintenance-report-dialog"))
+            .frame(
+                egui::Frame::NONE
+                    .fill(CARD)
+                    .stroke(egui::Stroke::new(1.0, LINE))
+                    .corner_radius(12.0)
+                    .inner_margin(egui::Margin::same(DIALOG_PADDING)),
+            )
+            .show(ctx, |ui| {
+                ui.set_width(
+                    DIALOG_WIDTH.min(ctx.content_rect().width() - 2.0 * DIALOG_PADDING as f32),
+                );
+                ui.label(
+                    egui::RichText::new(&report.title)
+                        .font(bold(20.0))
+                        .color(if failed { RED } else { GREEN }),
+                );
+                ui.add_space(12.0);
+                egui::ScrollArea::vertical()
+                    .id_salt("maintenance-report-body")
+                    .max_height((ctx.content_rect().height() - 230.0).clamp(80.0, 260.0))
+                    .show(ui, |ui| {
+                        for line in &report.lines {
+                            ui.add(
+                                egui::Label::new(egui::RichText::new(line).size(11.5).color(TEXT2))
+                                    .wrap(),
+                            );
+                            ui.add_space(5.0);
+                        }
+                    });
+                ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if primary_button(ui, "关闭", true, 120.0) {
+                            close = true;
+                        }
+                    });
+                });
+            });
+        if close || modal.should_close() {
+            self.last_maintenance = None;
+        }
+    }
+
     fn sidebar(&mut self, ui: &mut egui::Ui) {
         ui.add_space(24.0);
         ui.horizontal(|ui| {
@@ -1538,26 +1593,6 @@ impl App {
                 }
             });
 
-        if let Some(report) = &self.last_maintenance {
-            ui.add_space(18.0);
-            egui::Frame::NONE
-                .fill(CARD_ALT)
-                .stroke(egui::Stroke::new(1.0, LINE))
-                .corner_radius(10.0)
-                .inner_margin(egui::Margin::symmetric(16, 14))
-                .show(ui, |ui| {
-                    ui.label(
-                        egui::RichText::new(&report.title)
-                            .font(bold(12.0))
-                            .color(TEXT),
-                    );
-                    ui.add_space(6.0);
-                    for line in &report.lines {
-                        ui.label(egui::RichText::new(line).size(10.0).color(TEXT2));
-                    }
-                });
-        }
-
         ui.add_space(12.0);
         ui.label(
             egui::RichText::new(format!("固定方案：{}", FIXED_PROFILE))
@@ -1888,7 +1923,7 @@ impl App {
                         DIALOG_WIDTH.min(viewport.width() - 2.0 * (DIALOG_PADDING as f32 + 24.0)),
                     );
                     ui.label(
-                        egui::RichText::new(format!("确认{}？", action.label()))
+                        egui::RichText::new(format!("{}？", action.label()))
                             .font(bold(20.0))
                             .color(TEXT),
                     );
@@ -1947,8 +1982,7 @@ impl App {
                             (ui.available_width() - 296.0 - ui.spacing().item_spacing.x).max(0.0),
                         );
                         cancel = secondary_button(ui, "取消", 148.0).clicked();
-                        confirm =
-                            primary_button(ui, &format!("确认{}", action.label()), true, 148.0);
+                        confirm = primary_button(ui, action.label(), true, 148.0);
                     });
                 });
             if confirm {
@@ -1959,6 +1993,7 @@ impl App {
             }
         }
         self.app_update_modal(&ctx);
+        self.maintenance_report_modal(&ctx);
         ctx.request_repaint_after(Duration::from_millis(120));
     }
 }
@@ -4061,7 +4096,7 @@ mod tests {
         assert!(app.pending_maintenance.is_none());
         assert!(commands.try_recv().is_err());
 
-        for label in ["取消", "确认卸载"] {
+        for label in ["取消", "卸载"] {
             app.pending_maintenance = Some((app.games[0].clone(), Action::Uninstall));
             let input = egui::RawInput::default();
             let mut button = None;
@@ -4095,7 +4130,7 @@ mod tests {
                 .drop_without_applying_deltas();
             }
             assert!(app.pending_maintenance.is_none());
-            if label == "确认卸载" {
+            if label == "卸载" {
                 assert!(matches!(
                     commands.try_recv(),
                     Ok(Command::Maintain {
@@ -4106,6 +4141,35 @@ mod tests {
             }
             assert!(commands.try_recv().is_err());
         }
+    }
+
+    #[test]
+    fn maintenance_report_is_shown_as_a_modal() {
+        let (mut app, _events, _commands) = fixture();
+        app.page = Page::Maintain;
+        app.last_maintenance = Some(MaintenanceReport {
+            title: "REFramework 安装完成".into(),
+            lines: vec!["已安装 dinput8.dll".into()],
+        });
+        let ctx = egui::Context::default();
+        install_fonts(&ctx);
+        apply_style(&ctx);
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1180.0, 760.0),
+            )),
+            ..Default::default()
+        };
+        let mut found = false;
+        for _ in 0..3 {
+            let output = ctx.run_ui(input(), |ui| app.render(ui));
+            found = output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "REFramework 安装完成")
+            });
+            output.drop_without_applying_deltas();
+        }
+        assert!(found);
     }
 
     // NR_UI_SCREENSHOT_TO captures a settled native preview without touching real games.
