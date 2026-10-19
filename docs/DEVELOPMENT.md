@@ -157,7 +157,7 @@ dist/app-v0.2.0.sha256
   -MinisignExe "C:\path\to\minisign.exe"
 ```
 
-工作流 [`update-catalog.yml`](../.github/workflows/update-catalog.yml) 每 30 分钟、发布 Release 后或手动触发时运行。配置仓库 Secret `NR_CATALOG_SIGNING_KEY` 为本项目专用 minisign 私钥全文（非密码保护的 CI 专用密钥；必须与 `release/update-key.pub` 匹配）。工作流只在原仓库运行、不由 PR 触发，签名完成后删除临时密钥，两个清单文件以一个提交发布；生成或验签失败不会推送。元数据未变化时不产生提交。
+工作流 [`update-catalog.yml`](../.github/workflows/update-catalog.yml) 每 6 小时、发布 Release 后或手动触发时运行。配置仓库 Secret `NR_CATALOG_SIGNING_KEY` 为本项目专用 minisign 私钥全文（非密码保护的 CI 专用密钥；必须与 `release/update-key.pub` 匹配）。工作流只在原仓库运行、不由 PR 触发，签名完成后删除临时密钥，两个清单文件以一个提交发布；生成或验签失败不会推送。元数据未变化时不产生提交。
 
 Secret 不对访客公开，但拥有工作流修改权限的人或被攻破的工作流可能使用/窃取它。这把密钥同时具备签发安装器更新的权限，必须保护 GitHub 账号、限制仓库写权限，不能向 PR/不可信脚本暴露 Secret；疑似泄露时删除 Secret、轮换签名密钥并发布带新公钥的安装器。CI 凭证与私钥均不得提交到仓库。若不接受云端保存密钥，可关闭该工作流并在本地签署、发布清单。
 
