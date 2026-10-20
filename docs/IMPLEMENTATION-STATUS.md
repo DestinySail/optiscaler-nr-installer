@@ -11,6 +11,7 @@
 - 显式联网测试通过：从 Cloudflare 真实续传并下载约 200 MiB 资源，在临时目录安装、校验所有受管文件并卸载；预生成模型哈希一致，不部署源 DLL 或 Daniel 权重。准备阶段约 69.8 秒，全程约 90 秒。没有修改真实游戏目录。
 - Windows CI 全部通过；CI 产物的 minisign 更新清单验签及发布草稿附件回读校验通过。
 - 用户已在控制台启用缓存规则，六个文件的 Range GET 均返回正确字节、206、缓存 HIT 与 Age，包含插件 `.asi`、源 `.dll` 和许可说明。
+- 0.2.2 已正式发布，公开自动更新清单验签通过；正式发布 EXE 在隔离目录完成在线下载、安装、检查和卸载。已按用户要求删除 GitHub 两个旧资源 Release、全部附件及标签，资源统一存放于 R2。
 - 完整配置、源码用途与执行命令见 [Cloudflare 迁移记录](CLOUDFLARE-R2-MIGRATION.md)。
 
 ## 已完成
@@ -44,8 +45,8 @@
   - [app-v0.1.2](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.2)
   - [app-v0.1.3](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.3)
   - [app-v0.1.4](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.1.4)
-  - [extras-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-v1)
-  - [extras-maintenance-v1](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/extras-maintenance-v1)
+
+旧 `extras-v1` 与 `extras-maintenance-v1` 资源 Release 已于 2026-10-20 删除；当前资源清单为 [release/extras-v1.json](../release/extras-v1.json)。下列旧 ZIP 记录是早期版本的验收历史，不再提供 GitHub 下载。
 
 ## 已验证
 

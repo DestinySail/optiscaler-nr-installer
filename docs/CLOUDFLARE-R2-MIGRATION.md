@@ -1,6 +1,6 @@
 # 固定资源迁移到 Cloudflare R2：直接文件下载方案
 
-状态：云端和客户端验收通过。核对日期：2026-10-20。R2 资源、下载域名、CDN 缓存规则和客户端代码已完成；签名安装器发布产物已准备并验证。
+状态：迁移完成。核对日期：2026-10-20。R2 资源、下载域名、CDN 缓存规则和客户端代码已完成；0.2.2 签名安装器已正式发布，自动更新清单已验证生效。
 
 按用户确定的方向：R2 直接存放资源文件，新版安装器逐个下载并校验，取消在线固定资源的 ZIP 打包、下载和解压。不兼容旧客户端，不增加 GitHub 回退。安装器自动更新继续负责分发新版。
 
@@ -178,7 +178,7 @@ Daniel 是另一条使用链。上游 `install-amd-presr.ps1` 在选择 Daniel �
 
 执行顺序：云资源和域名就绪 → 源文件校验并上传 → 公网下载与缓存验收 → 客户端改动及测试通过 → 发布签名新版和更新清单 → 验证自动更新后的实际下载地址。
 
-不维护旧客户端下载、不做 GitHub 回退。遇到故障先修复对象、域名或规则；清单错误则发布修复版安装器，不能通过覆盖已发布文件来凑哈希。历史 Release 附件的删除不属于迁移必需步骤，本次保留作为人工恢复材料。
+不维护旧客户端下载、不做 GitHub 回退。遇到故障先修复对象、域名或规则；清单错误则发布修复版安装器，不能通过覆盖已发布文件来凑哈希。按用户要求，2026-10-20 已删除 GitHub 的 `extras-v1`、`extras-maintenance-v1` 资源 Release、全部附件及对应标签；普通资源和维护源材料统一保留在 R2。旧安装器应先自动更新至 0.2.2 再安装资源。
 
 ## 8. 成本和范围
 
@@ -194,6 +194,7 @@ R2 Standard 当前每月免费额度为 10 GB-month 存储、100 万次 A 类和
 - Windows CI [39358001313](https://github.com/DestinySail/optiscaler-nr-installer/actions/runs/39358001313) 全部通过；0.2.2 使用该 CI 产物，更新清单 minisign 验签及草稿附件回读校验通过。EXE SHA-256 为 `ad639cbbc8bfdc8d5cbea7cf1ace5ef21ac5b2e31ccfc1508b2dd15db8493d14`。
 - 显式联网验收已通过：从 CDN 取得真实 1 MiB 前缀后续传插件，逐个下载并验证三个资源，在隔离临时目录安装、检查和卸载；准备阶段约 69.8 秒，全程约 90 秒。旧设置中的不可达 ZIP URL 没有影响下载；两个源材料没有部署到测试游戏目录；卸载后只保留原始惰性 PE 测试文件。未启动或修改真实游戏。
 - 用户已在控制台启用 `OptiScaler downloads` 缓存规则：`http.host eq "downloads.bonvoyage.dpdns.org" and starts_with(http.request.uri.path, "/optiscaler-nr/")`，动作设为 Eligible for cache，Edge TTL 尊重源站。六个文件均已实测命中缓存，包含 `.asi`、`.dll` 和许可文本。
+- [0.2.2](https://github.com/DestinySail/optiscaler-nr-installer/releases/tag/app-v0.2.2) 已正式发布；更新目录工作流成功，公开清单版本为 0.2.2 且签名有效。正式发布 EXE 在隔离目录完成 Cloudflare 下载、841 个受管文件安装、检查和卸载；旧 ZIP 配置未参与下载，源材料未安装，惰性测试文件未变。
 - Wrangler OAuth 缺少 Rulesets 权限，Computer Use 读取 Chrome URL 失败，因此缓存规则由用户在已登录的外部浏览器完成；未新增 API Token 或安装浏览器扩展。
 
 手动联网验收命令（使用已校验的 v1.12.2 主包 ZIP，下载约 200 MiB 固定资源，仅安装到临时测试目录，不运行游戏）：
