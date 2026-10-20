@@ -1,30 +1,16 @@
 param(
     [Parameter(Mandatory = $true)]
     [string]$SourceDir,
-    [string]$Version = 'extras-v1',
-    [ValidateSet('runtime', 'maintenance')]
-    [string]$Kind = 'runtime'
+    [string]$Version = 'extras-maintenance-v1'
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $source = (Resolve-Path -LiteralPath $SourceDir).Path
-if ($Kind -eq 'maintenance' -and -not $PSBoundParameters.ContainsKey('Version')) {
-    $Version = 'extras-maintenance-v1'
-}
-$required = if ($Kind -eq 'maintenance') {
-    @(
-        (Join-Path $source 'nvngx_dlssnr.dll'),
-        (Join-Path $source 'dlssnr_on_amd_weights.bin')
-    )
-}
-else {
-    @(
-        (Join-Path $source 'MFGUnlocker.asi'),
-        (Join-Path $source 'dlssnr-amd\dlssnr.bin'),
-        (Join-Path $source 'dlssnr-amd\dlssnr-int4.bin')
-    )
-}
+$required = @(
+    (Join-Path $source 'nvngx_dlssnr.dll'),
+    (Join-Path $source 'dlssnr_on_amd_weights.bin')
+)
 foreach ($item in $required) {
     if (-not (Test-Path -LiteralPath $item -PathType Leaf)) {
         throw "固定资源缺少 $item"

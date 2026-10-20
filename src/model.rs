@@ -7,10 +7,6 @@ pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const UPSTREAM_REPO: &str = "TheAutomatic/dlss-5-amd-project";
 pub const FIXED_PROFILE: &str = "OptiScaler NR + Mochizuki 后端 + Intel XeFG";
 pub const DEFAULT_RELEASE_REPO: &str = "DestinySail/optiscaler-nr-installer";
-pub const DEFAULT_EXTRAS_VERSION: &str = "extras-v1";
-pub const DEFAULT_EXTRAS_URL: &str = "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/extras-v1/extras-v1.zip";
-pub const DEFAULT_EXTRAS_SHA256: &str =
-    "ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533";
 
 #[derive(Debug, Clone)]
 pub struct AppPaths {
@@ -46,10 +42,18 @@ impl AppPaths {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ExtrasSpec {
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExtrasManifest {
     pub version: String,
-    pub url: String,
+    pub base_url: String,
+    pub files: Vec<ExtrasFile>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExtrasFile {
+    pub path: String,
+    pub key: String,
+    pub size: u64,
     pub sha256: String,
 }
 
@@ -58,8 +62,6 @@ pub struct Settings {
     #[serde(default)]
     pub release_repo: String,
     #[serde(default)]
-    pub extras: Option<ExtrasSpec>,
-    #[serde(default)]
     pub local_upstream_source: Option<PathBuf>,
     #[serde(default)]
     pub local_extras_source: Option<PathBuf>,
@@ -67,22 +69,10 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        let extras = Some(ExtrasSpec {
-            version: option_env!("NR_EXTRAS_VERSION")
-                .unwrap_or(DEFAULT_EXTRAS_VERSION)
-                .to_string(),
-            url: option_env!("NR_EXTRAS_URL")
-                .unwrap_or(DEFAULT_EXTRAS_URL)
-                .to_string(),
-            sha256: option_env!("NR_EXTRAS_SHA256")
-                .unwrap_or(DEFAULT_EXTRAS_SHA256)
-                .to_string(),
-        });
         Self {
             release_repo: option_env!("NR_RELEASE_REPO")
                 .unwrap_or(DEFAULT_RELEASE_REPO)
                 .to_string(),
-            extras,
             local_upstream_source: None,
             local_extras_source: None,
         }

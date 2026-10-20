@@ -11,8 +11,8 @@ use crate::games;
 use crate::gpu;
 use crate::install;
 use crate::model::{
-    APP_NAME, APP_VERSION, Action, AppPaths, ExtrasSpec, FIXED_PROFILE, GameInfo, GpuInfo,
-    MaintenanceReport, Progress, Settings, UpstreamRelease,
+    APP_NAME, APP_VERSION, Action, AppPaths, FIXED_PROFILE, GameInfo, GpuInfo, MaintenanceReport,
+    Progress, Settings, UpstreamRelease,
 };
 use crate::self_update::{self, AppUpdateInfo};
 use crate::updates;
@@ -435,10 +435,7 @@ impl App {
     }
 
     fn choose_extras_source(&mut self) {
-        if let Some(path) = rfd::FileDialog::new()
-            .add_filter("ZIP", &["zip"])
-            .pick_file()
-        {
+        if let Some(path) = rfd::FileDialog::new().pick_folder() {
             self.draft.local_extras_source = Some(path);
         }
     }
@@ -1668,13 +1665,13 @@ impl App {
                     .as_ref()
                     .map(|path| {
                         format!(
-                            "可选。留空时使用项目的固定资源包。已选择：{}",
+                            "可选。留空时从 Cloudflare 下载固定资源。已选择：{}",
                             truncate(&path.display().to_string(), 56)
                         )
                     })
-                    .unwrap_or_else(|| "可选。留空时使用项目的固定资源包。".to_string());
-                settings_row(ui, "本地资源包", &extras_desc, |ui| {
-                    if secondary_button(ui, "选择 ZIP…", 110.0).clicked() {
+                    .unwrap_or_else(|| "可选。留空时从 Cloudflare 下载固定资源。".to_string());
+                settings_row(ui, "本地资源目录", &extras_desc, |ui| {
+                    if secondary_button(ui, "选择目录…", 110.0).clicked() {
                         pick_extras = true;
                     }
                     if extras_path.is_some() && ghost_button(ui, "清除").clicked() {
@@ -1744,39 +1741,13 @@ impl App {
                         .font(font(11.0)),
                 );
                 ui.add_space(10.0);
-                if let Some(extras) = self.draft.extras.as_mut() {
-                    field_label(ui, "固定资源版本");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut extras.version)
-                            .desired_width(f32::INFINITY)
-                            .font(font(11.0)),
-                    );
-                    ui.add_space(8.0);
-                    field_label(ui, "固定资源地址");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut extras.url)
-                            .desired_width(f32::INFINITY)
-                            .font(font(11.0)),
-                    );
-                    ui.add_space(8.0);
-                    field_label(ui, "SHA-256");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut extras.sha256)
-                            .desired_width(f32::INFINITY)
-                            .font(font(11.0)),
-                    );
-                } else if ghost_button(ui, "添加固定资源").clicked() {
-                    self.draft.extras = Some(ExtrasSpec {
-                        version: "extras-v1".to_string(),
-                        url: String::new(),
-                        sha256: String::new(),
-                    });
-                }
                 ui.add_space(6.0);
                 ui.label(
-                    egui::RichText::new("这些值用于签名更新和固定资源校验。")
-                        .size(9.5)
-                        .color(MUTED),
+                    egui::RichText::new(
+                        "固定资源由安装器内置清单校验，通过 Cloudflare 分文件下载。",
+                    )
+                    .size(9.5)
+                    .color(MUTED),
                 );
             });
 

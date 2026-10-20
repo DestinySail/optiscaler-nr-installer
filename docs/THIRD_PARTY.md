@@ -19,7 +19,7 @@
 | Intel XeSS | [intel/xess](https://github.com/intel/xess) | 以随包许可证为准 |
 | REFramework nightly | [praydog/REFramework-nightly](https://github.com/praydog/REFramework-nightly) | 许可见上游；安装器只部署 `dinput8.dll` |
 
-`nvngx_dlssnr.dll` 是 NVIDIA 专有运行库，没有对应的开源仓库。它只存在于维护存档，不被安装器部署。NVIDIA 运行库和由它生成的模型权重是否允许再分发，需要在发布资源前确认。
+`nvngx_dlssnr.dll` 是 NVIDIA 专有运行库，没有对应的开源仓库。它是提取 Mochizuki 模型的源材料，与 Daniel 权重一起单独存档在 Cloudflare；安装器只下载生成好的模型和 XeFG 插件。源码追踪和提取验证见 [DLL 用途核查](CLOUDFLARE-R2-MIGRATION.md#nvngx_dlssnrdll-的完整用途核查)。NVIDIA 运行库和由它生成的模型权重是否允许再分发，需要在发布资源前确认。
 
 ## 安装器直接依赖
 

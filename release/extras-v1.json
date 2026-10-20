@@ -1,17 +1,44 @@
 {
   "version": "extras-v1",
-  "asset": "extras-v1.zip",
-  "sha256": "ec993a9a75772c2a178d167be43a1760218001a68e6a367f1caa93be9e400533",
-  "url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/extras-v1/extras-v1.zip",
-  "contents": [
-    "EXTRAS-NOTICES.md",
-    "MFGUnlocker.asi",
-    "dlssnr-amd/dlssnr.bin",
-    "dlssnr-amd/dlssnr-int4.bin"
+  "base_url": "https://downloads.bonvoyage.dpdns.org/optiscaler-nr/",
+  "files": [
+    {
+      "path": "MFGUnlocker.asi",
+      "key": "extras-v1/MFGUnlocker.asi",
+      "size": 8929280,
+      "sha256": "4ac118f5cbb13a556c84979c2a2d2210a756dce172a9425ff62d870694747a2e"
+    },
+    {
+      "path": "dlssnr-amd/dlssnr.bin",
+      "key": "extras-v1/dlssnr-amd/dlssnr.bin",
+      "size": 147756560,
+      "sha256": "2b41c888cf4155b8958c665ba64018ab0bd25c85fc71a2b6db86d0d04d1f7fbd"
+    },
+    {
+      "path": "dlssnr-amd/dlssnr-int4.bin",
+      "key": "extras-v1/dlssnr-amd/dlssnr-int4.bin",
+      "size": 53211392,
+      "sha256": "22a0e2d3db1c2101a67e0d9aad066e0916afbc32cba47820f5ad24d46602319c"
+    }
   ],
-  "deployed": [
-    "MFGUnlocker.asi -> OptiScaler/plugins/MFGUnlocker.asi",
-    "dlssnr-amd/dlssnr.bin -> dlssnr-amd/dlssnr.bin",
-    "dlssnr-amd/dlssnr-int4.bin -> dlssnr-amd/dlssnr-int4.bin"
+  "sources": [
+    {
+      "path": "nvngx_dlssnr.dll",
+      "key": "sources/nvidia-310.8.0/nvngx_dlssnr.dll",
+      "size": 165840496,
+      "sha256": "e16bcf15e16e13f527491cdf7845b2fe6521a738d8f7c9c721866a8496e1fc8e"
+    },
+    {
+      "path": "dlssnr_on_amd_weights.bin",
+      "key": "sources/daniel-v1/dlssnr_on_amd_weights.bin",
+      "size": 147689451,
+      "sha256": "6bf8dc931ef3ccffe18c82de26ab374156e7f19539ffcf8eabaa25dca5cf15ab"
+    },
+    {
+      "path": "EXTRAS-NOTICES.md",
+      "key": "extras-v1/EXTRAS-NOTICES.md",
+      "size": 1408,
+      "sha256": "82b73554cc406c85737a77a395d8111f79b0ac2897fd42012de34e2b6777ac3f"
+    }
   ]
 }

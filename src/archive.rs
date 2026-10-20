@@ -93,15 +93,6 @@ pub fn find_release_root(root: &Path) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("压缩包里找不到 OptiScaler 发布目录: {}", root.display()))
 }
 
-pub fn find_extras_root(root: &Path) -> Result<PathBuf, String> {
-    find_marker_root(root, &["MFGUnlocker.asi", "dlssnr-amd/dlssnr.bin"], 3).ok_or_else(|| {
-        format!(
-            "资源包里找不到 MFGUnlocker.asi / dlssnr-amd/dlssnr.bin: {}",
-            root.display()
-        )
-    })
-}
-
 fn find_marker_root(root: &Path, markers: &[&str], depth: usize) -> Option<PathBuf> {
     if markers.iter().all(|marker| root.join(marker).is_file()) {
         return Some(root.to_path_buf());
