@@ -9,6 +9,6 @@
 | [THIRD_PARTY.md](THIRD_PARTY.md) | 查询第三方来源、仓库地址和许可证 |
 | [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md) | 查看当前验证范围、产物摘要和未完成事项 |
 | [REVIEW-2026-10-18.md](REVIEW-2026-10-18.md) | 安装安全审查、文案调整及精简实施方案 |
-| [CLOUDFLARE-R2-MIGRATION.md](CLOUDFLARE-R2-MIGRATION.md) | 固定资源迁移至 Cloudflare R2 的待实施方案、发布流程与验收条件 |
+| [CLOUDFLARE-R2-MIGRATION.md](CLOUDFLARE-R2-MIGRATION.md) | 固定资源迁移至 Cloudflare R2 的实施记录、发布流程与验收条件 |
 
 发布说明位于 [`release/notes/`](../release/notes/)。

@@ -1,6 +1,6 @@
 # 固定资源迁移到 Cloudflare R2：直接文件下载方案
 
-状态：实施中。核对日期：2026-10-20。R2 资源、下载域名和客户端代码已完成；CDN 缓存规则与正式发布仍待验收。
+状态：云端和客户端验收通过。核对日期：2026-10-20。R2 资源、下载域名、CDN 缓存规则和客户端代码已完成；签名安装器发布产物已准备并验证。
 
 按用户确定的方向：R2 直接存放资源文件，新版安装器逐个下载并校验，取消在线固定资源的 ZIP 打包、下载和解压。不兼容旧客户端，不增加 GitHub 回退。安装器自动更新继续负责分发新版。
 
@@ -14,7 +14,7 @@
 - 已绑定下载域名：`downloads.bonvoyage.dpdns.org`，Cloudflare 返回 ownership/ssl 均为 active。
 - `r2.dev` 公开开发地址保持关闭。现有 Wrangler OAuth 足以创建桶、绑定域名和上传对象，但没有 Cache Rules 编辑权限。
 
-三个安装文件、两个源材料及许可说明均已上传。六个文件都通过公开 HTTPS 完整下载、大小与 SHA-256 校验及 1024 字节 Range 响应验收。`.bin` 已返回缓存 HIT；`.asi`、`.dll` 和许可文本仍为 DYNAMIC，不能据此宣称 CDN 缓存配置全部完成。
+三个安装文件、两个源材料及许可说明均已上传。六个文件都通过公开 HTTPS 完整下载、大小与 SHA-256 校验；规则启用后，六个 URL 的 Range GET 均返回 206、正确的前 1024 字节和缓存 HIT/Age。HEAD 探测仍可能返回 DYNAMIC，不能仅据此判断实际 GET 未缓存。
 
 ## 2. 分发结构
 
@@ -162,7 +162,7 @@ Daniel 是另一条使用链。上游 `install-amd-presr.ps1` 在选择 Daniel �
 
 | 验收 | 通过标准 |
 |---|---|
-| 登录与权限 | 桶与域名已通过 API 配置并确认 active；Cache Rules 编辑权限仍缺失 |
+| 登录与权限 | 桶与域名已通过 API 配置并确认 active；用户已在控制台启用缓存规则，普通下载不需要管理权限 |
 | 公网下载 | 三个 URL 均返回文件，大小与 SHA-256 完全匹配，无 HTML 挑战页 |
 | 断点续传 | 每个文件 Range 请求返回正确的 206/Content-Range；真实中断后续传得到正确哈希 |
 | CDN | 完整读取后重复访问，检查 CF-Cache-Status/Age，确认 `.bin` 和 `.asi` 真正可缓存 |
@@ -184,17 +184,17 @@ Daniel 是另一条使用链。上游 `install-amd-presr.ps1` 在选择 Daniel �
 
 R2 Standard 当前每月免费额度为 10 GB-month 存储、100 万次 A 类和 1000 万次 B 类操作，出站流量免费。超额存储 $0.015/GB-month、A 类 $4.50/百万次、B 类 $0.36/百万次；按整个账户用量计算。直接下载总请求数增加为三个资源请求，但当前资源体积与请求数量都不需要引入额外服务。[官方价格](https://developers.cloudflare.com/r2/pricing/)
 
-本方案迁移的是固定资源。上游主包、安装器更新和签名清单仍按原渠道工作。上游主包及 REFramework 仍以 ZIP 下载，并调用 `src/archive.rs` 的 `extract_zip`，因此 `Cargo.toml` 中的 Rust `zip` 依赖仍需保留；这里指多个安装流程复用的解压代码，不是系统里的共享 DLL。正式发布必须等余下的 CDN 缓存与构建验收通过。
+本方案迁移的是固定资源。上游主包、安装器更新和签名清单仍按原渠道工作。上游主包及 REFramework 仍以 ZIP 下载，并调用 `src/archive.rs` 的 `extract_zip`，因此 `Cargo.toml` 中的 Rust `zip` 依赖仍需保留；这里指多个安装流程复用的解压代码，不是系统里的共享 DLL。CDN 缓存与 Windows 构建验收均已通过。
 
 ## 9. 当前实施记录
 
 - 普通回归测试 46 项通过；新增两个测试覆盖清单/旧设置、逐文件续传/缓存复用/损坏拦截。手动联网安装测试默认忽略，需要显式启用。
 - 格式检查与 Clippy `-D warnings` 通过；发布脚本的损坏源文件拒绝检查通过。
 - 三个安装资源和两份源材料内容均保持原哈希，已分别上传；许可说明也已验证。
-- 0.2.2 Release 构建和本地更新清单 minisign 签名验证通过，尚未正式发布。
+- Windows CI [39358001313](https://github.com/DestinySail/optiscaler-nr-installer/actions/runs/39358001313) 全部通过；0.2.2 使用该 CI 产物，更新清单 minisign 验签及草稿附件回读校验通过。EXE SHA-256 为 `ad639cbbc8bfdc8d5cbea7cf1ace5ef21ac5b2e31ccfc1508b2dd15db8493d14`。
 - 显式联网验收已通过：从 CDN 取得真实 1 MiB 前缀后续传插件，逐个下载并验证三个资源，在隔离临时目录安装、检查和卸载；准备阶段约 69.8 秒，全程约 90 秒。旧设置中的不可达 ZIP URL 没有影响下载；两个源材料没有部署到测试游戏目录；卸载后只保留原始惰性 PE 测试文件。未启动或修改真实游戏。
-- 缓存规则目标：`http.host eq "downloads.bonvoyage.dpdns.org" and starts_with(http.request.uri.path, "/optiscaler-nr/")`，动作设为 Eligible for cache，Edge TTL 尊重源站。不要设置一年错误响应缓存。
-- 当前 Wrangler OAuth 对该域名的 Rulesets API 返回 403；Windows Computer Use 在识别 Chrome URL 时被底层工具中止，OpenCLI Browser Bridge 也未连接。没有绕过这些限制或声称已配置缓存规则。
+- 用户已在控制台启用 `OptiScaler downloads` 缓存规则：`http.host eq "downloads.bonvoyage.dpdns.org" and starts_with(http.request.uri.path, "/optiscaler-nr/")`，动作设为 Eligible for cache，Edge TTL 尊重源站。六个文件均已实测命中缓存，包含 `.asi`、`.dll` 和许可文本。
+- Wrangler OAuth 缺少 Rulesets 权限，Computer Use 读取 Chrome URL 失败，因此缓存规则由用户在已登录的外部浏览器完成；未新增 API Token 或安装浏览器扩展。
 
 手动联网验收命令（使用已校验的 v1.12.2 主包 ZIP，下载约 200 MiB 固定资源，仅安装到临时测试目录，不运行游戏）：
 
