@@ -31,7 +31,7 @@
 - Windows 10 或 Windows 11，x64。
 - AMD RDNA4 独立显卡。
 - 游戏为 64 位 D3D12 应用，并支持本固定方案所需的 DLSSG/Streamline 通道。
-- 首次使用时需要能够访问 GitHub Releases。
+- 首次使用时需要能够访问 GitHub Releases 和 Cloudflare 下载域名 `downloads.bonvoyage.dpdns.org`。
 
 ## 快速开始
 
@@ -65,7 +65,7 @@
 - 其他自动发现的游戏会显示为“候选”，在实际游戏内验证前不能视为已支持。
 - “发现游戏”“允许安装”“游戏内实测通过”是三种不同状态。
 - 联网游戏的反作弊提示必须立即停用本方案；本项目不提供绕过。
-- 固定资源包含的模型和二进制继续适用各自上游许可证，详见[来源与第三方组件](docs/THIRD_PARTY.md)和资源包内的 `EXTRAS-NOTICES.md`。
+- 固定资源从 Cloudflare 逐文件下载，并按安装器内置清单校验大小与 SHA-256，无需解压资源包。模型和二进制继续适用各自上游许可证，详见[来源与第三方组件](docs/THIRD_PARTY.md)和[资源来源说明](https://downloads.bonvoyage.dpdns.org/optiscaler-nr/extras-v1/EXTRAS-NOTICES.md)。
 
 ## 从源码构建
 

@@ -166,7 +166,7 @@ fn headless_install(exe: std::path::PathBuf, args: &[String]) -> Result<(), Stri
     if let Some(index) = args.iter().position(|arg| arg == "--extras") {
         settings.local_extras_source = Some(std::path::PathBuf::from(
             args.get(index + 1)
-                .ok_or_else(|| "--extras 后需要 ZIP 路径".to_string())?,
+                .ok_or_else(|| "--extras 后需要固定资源目录路径".to_string())?,
         ));
     }
     let game = games::inspect_manual(exe)?;
@@ -214,7 +214,7 @@ fn headless_maintenance(
             if let Some(index) = args.iter().position(|arg| arg == "--extras") {
                 settings.local_extras_source = Some(std::path::PathBuf::from(
                     args.get(index + 1)
-                        .ok_or_else(|| "--extras 后需要 ZIP 路径".to_string())?,
+                        .ok_or_else(|| "--extras 后需要固定资源目录路径".to_string())?,
                 ));
             }
             let upstream = updates::check_upstream(&paths, &settings).ok();

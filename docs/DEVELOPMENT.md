@@ -46,19 +46,16 @@ cargo build --release --locked
 
 | 变量 | 用途 |
 |---|---|
-| `NR_RELEASE_REPO` | 安装器和固定资源所在的 GitHub 仓库 |
+| `NR_RELEASE_REPO` | 安装器发布所在的 GitHub 仓库 |
 | `NR_UPDATE_PUBKEY` | minisign 公钥的 base64 内容 |
-| `NR_EXTRAS_VERSION` | 固定资源版本，例如 `extras-v1` |
-| `NR_EXTRAS_URL` | 必装资源包下载地址 |
-| `NR_EXTRAS_SHA256` | 必装资源包 SHA-256 |
 
 `NR_UPDATE_PUBKEY` 只包含公钥。私钥不得进入源码、构建产物、日志或 GitHub 仓库，应由发布环境单独保存。
 
 当前公钥在 `release/update-key.pub`。GitHub Actions 从仓库变量 `NR_UPDATE_PUBKEY` 读取同一个值。
 
-## 资源包
+## 固定资源
 
-源码仓库只提交清单、脚本和说明，不提交大体积模型。资源以 Release 附件发布。
+源码仓库只提交清单、脚本和说明，不提交大体积模型。固定资源以原始文件发布到 Cloudflare R2，通过 `downloads.bonvoyage.dpdns.org` 下载。
 
 必装资源：
 
@@ -71,26 +68,27 @@ cargo build --release --locked
 - `nvngx_dlssnr.dll`
 - `dlssnr_on_amd_weights.bin`
 
-生成资源包：
+`release/extras-v1.json` 是唯一配置来源，安装器编译时内置其中的 `files` 列表；`sources` 只供发布脚本存档源材料和许可说明。每项都有路径、R2 key、大小与 SHA-256。修改资源时更新这份清单并发布新版安装器，不再设置 `NR_EXTRAS_*` 编译变量。旧设置文件的单 ZIP `extras` 字段会被忽略；本地资源导入只接受包含这三个文件的目录。
+
+准备包含五个二进制文件及原始 `EXTRAS-NOTICES.md` 的源目录，然后验证、上传和公开回读检查：
 
 ```powershell
-.\scripts\package-extras.ps1 -Kind runtime `
-  -SourceDir "C:\path\to\extras-source" `
-  -Version extras-v1
+.\scripts\publish-extras-r2.ps1 -SourceDir "C:\path\to\extras-source" -CheckOnly
 
-.\scripts\package-extras.ps1 -Kind maintenance `
-  -SourceDir "C:\path\to\extras-source"
+.\scripts\test-publish-extras-r2.ps1
+
+# 使用已登录的 Wrangler；没有创建桶或修改缓存规则的隐式操作。
+.\scripts\publish-extras-r2.ps1 -SourceDir "C:\path\to\extras-source"
 ```
 
-资源版本或内容变化时，需要同步更新：
+Wrangler 不在 PATH 中时，可通过 `-WranglerCommand @('C:\path\to\node.exe', 'C:\path\to\wrangler.js')` 指定现有命令。上传沿用当前 Wrangler 登录，不额外保存 AWS/S3 密钥。
 
-- `src/model.rs` 中的默认版本、URL 和 SHA-256
-- `release/extras-v1.json`
-- `.github/workflows/build.yml` 中的 `NR_EXTRAS_*`
-- 对应 Release 和说明
+上传器在发布前校验全部源文件；远端已有对象必须哈希一致才跳过，差异对象拒绝覆盖，只有“键不存在”才上传。发布后通过公开域名完整下载并验证大小、SHA-256 和 Range 响应。每个版本只运行一个发布者；同版本路径不能覆盖，内容变化必须使用新版本路径。
 
-安装前会校验资源包 SHA-256，并把 `dlssnr-int4.bin` 与主包的
+安装器下载完成后校验每个文件的大小与 SHA-256，并把 `dlssnr-int4.bin` 与主包的
 `model-tools/dlssnr-int4.sha256` 比较。主包更新导致模型不兼容时，安装器会停止并等待新的资源版本。
+
+上游主包及 REFramework 继续使用 ZIP；只有固定资源不再打包或解压。历史维护 ZIP 如需人工归档仍可执行 `scripts/package-extras.ps1 -SourceDir ...`，不参与客户端安装。云端结构与验收状态见 [Cloudflare 迁移记录](CLOUDFLARE-R2-MIGRATION.md)。
 
 ## 安装失败与存储清理
 

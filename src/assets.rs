@@ -1,10 +1,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::archive::{extract_zip, find_extras_root, find_release_root, read_small_text};
-use crate::model::{AppPaths, Progress, Settings, UpstreamRelease};
+use crate::archive::{extract_zip, find_release_root, read_small_text};
+use crate::model::{AppPaths, ExtrasManifest, Progress, Settings, UpstreamRelease};
 use crate::updates::{check_upstream, download_verified, load_cached_upstream};
-use crate::util::{format_bytes, remove_tree_safely, sha256_file};
+use crate::util::{format_bytes, remove_tree_safely, safe_relative, sha256_file};
 
 #[derive(Debug, Clone)]
 pub struct PreparedComponents {
@@ -81,65 +81,24 @@ pub fn prepare(
     let upstream_tag = actual_version.unwrap_or(upstream_tag);
 
     let (extras_root, extras_version) = if include_extras {
-        let (extras_input, extras_version, extras_key) =
+        let manifest = fixed_extras()?;
+        let (extras_root, extras_version) =
             if let Some(source) = settings.local_extras_source.as_deref() {
+                if !source.is_dir() {
+                    return Err("固定资源已改为目录导入，请重新选择目录".to_string());
+                }
                 progress(Progress::new(
                     "准备组件",
                     format!("使用本地固定资源: {}", source.display()),
                     None,
                 ));
-                let fingerprint = source_fingerprint(source)?;
-                (
-                    source.to_path_buf(),
-                    "local".to_string(),
-                    format!("local-{}", &fingerprint[..fingerprint.len().min(16)]),
-                )
-            } else if let Some(extras) = settings.extras.as_ref() {
-                if extras.url.trim().is_empty() || extras.sha256.trim().is_empty() {
-                    return Err("固定资源设置缺少 URL 或 SHA-256".to_string());
-                }
-                let destination = paths
-                    .cache
-                    .join("extras")
-                    .join(format!("{}.zip", safe_label(&extras.version)));
-                progress(Progress::new(
-                    "准备组件",
-                    format!("下载固定资源 {}", extras.version),
-                    Some(0.0),
-                ));
-                download_verified(
-                    &extras.url,
-                    &destination,
-                    &extras.sha256,
-                    None,
-                    "下载固定资源",
-                    &mut progress,
-                )?;
-                (
-                    destination,
-                    extras.version.clone(),
-                    format!(
-                        "{}-{}",
-                        safe_label(&extras.version),
-                        &extras.sha256[..extras.sha256.len().min(12)]
-                    ),
-                )
+                (source.to_path_buf(), "local".to_string())
             } else {
-                return Err(
-            "未配置固定资源包。请在维护页填写 extras-v1.zip 的 URL 和 SHA-256，或导入本地资源包。"
-                .to_string(),
-                );
+                let destination = paths.cache.join("extras").join(&manifest.version);
+                download_extras(&manifest, &destination, &mut progress)?;
+                (destination, manifest.version.clone())
             };
-        let extras_root = materialize(
-            paths,
-            &extras_input,
-            "extras",
-            &extras_key,
-            "解压固定资源",
-            &mut progress,
-        )?;
-        let extras_root = find_extras_root(&extras_root)?;
-        validate_extras(&extras_root)?;
+        validate_extras(&extras_root, &manifest)?;
         validate_model_compatibility(&release_root, &extras_root)?;
         (extras_root, extras_version)
     } else {
@@ -152,6 +111,91 @@ pub fn prepare(
         upstream_tag,
         extras_version,
     })
+}
+
+pub fn fixed_extras() -> Result<ExtrasManifest, String> {
+    let manifest: ExtrasManifest = serde_json::from_str(include_str!("../release/extras-v1.json"))
+        .map_err(|e| format!("内置固定资源清单无效: {e}"))?;
+    validate_manifest(&manifest)?;
+    Ok(manifest)
+}
+
+fn validate_manifest(manifest: &ExtrasManifest) -> Result<(), String> {
+    let url =
+        reqwest::Url::parse(&manifest.base_url).map_err(|e| format!("固定资源地址无效: {e}"))?;
+    if url.scheme() != "https"
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !manifest.base_url.ends_with('/')
+        || manifest.version.is_empty()
+        || safe_label(&manifest.version) != manifest.version
+        || matches!(manifest.version.as_str(), "." | "..")
+    {
+        return Err("固定资源版本或 HTTPS 地址无效".to_string());
+    }
+    let mut paths = std::collections::HashSet::new();
+    for file in &manifest.files {
+        for path in [&file.path, &file.key] {
+            safe_relative(Path::new(path))?;
+            if !path
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"._-/".contains(&c))
+            {
+                return Err(format!("固定资源路径无效: {path}"));
+            }
+        }
+        if !paths.insert(file.path.as_str())
+            || file.key != format!("{}/{}", manifest.version, file.path)
+            || file.size == 0
+            || file.sha256.len() != 64
+            || !file.sha256.bytes().all(|c| c.is_ascii_hexdigit())
+        {
+            return Err(format!("固定资源清单条目无效: {}", file.path));
+        }
+    }
+    let required = [
+        "MFGUnlocker.asi",
+        "dlssnr-amd/dlssnr.bin",
+        "dlssnr-amd/dlssnr-int4.bin",
+    ];
+    if paths != required.into_iter().collect() {
+        return Err("固定资源清单必须包含且只包含三个安装文件".to_string());
+    }
+    Ok(())
+}
+
+fn download_extras(
+    manifest: &ExtrasManifest,
+    destination: &Path,
+    progress: &mut impl FnMut(Progress),
+) -> Result<(), String> {
+    for (index, file) in manifest.files.iter().enumerate() {
+        download_verified(
+            &format!("{}{}", manifest.base_url, file.key),
+            &destination.join(safe_relative(Path::new(&file.path))?),
+            &file.sha256,
+            Some(file.size),
+            "下载固定资源",
+            |update| {
+                progress(Progress::new(
+                    update.stage,
+                    format!(
+                        "{}/{} · {} · {}",
+                        index + 1,
+                        manifest.files.len(),
+                        file.path,
+                        update.detail
+                    ),
+                    update
+                        .fraction
+                        .map(|fraction| (index as f32 + fraction) / manifest.files.len() as f32),
+                ));
+            },
+        )?;
+    }
+    Ok(())
 }
 
 fn materialize(
@@ -198,14 +242,16 @@ fn validate_release(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_extras(root: &Path) -> Result<(), String> {
-    for item in [
-        "MFGUnlocker.asi",
-        "dlssnr-amd/dlssnr.bin",
-        "dlssnr-amd/dlssnr-int4.bin",
-    ] {
-        if !root.join(item).is_file() {
-            return Err(format!("固定资源缺少 {item}: {}", root.display()));
+fn validate_extras(root: &Path, manifest: &ExtrasManifest) -> Result<(), String> {
+    for file in &manifest.files {
+        let path = root.join(safe_relative(Path::new(&file.path))?);
+        if !path.is_file() {
+            return Err(format!("固定资源缺少 {}: {}", file.path, root.display()));
+        }
+        if path.metadata().map_err(|e| e.to_string())?.len() != file.size
+            || !sha256_file(&path)?.eq_ignore_ascii_case(&file.sha256)
+        {
+            return Err(format!("固定资源大小或 SHA-256 不匹配: {}", file.path));
         }
     }
     Ok(())
@@ -247,5 +293,265 @@ pub fn source_fingerprint(source: &Path) -> Result<String, String> {
         sha256_file(source)
     } else {
         Ok(format!("dir:{}", source.display()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader, Write};
+    use std::net::TcpListener;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    #[ignore = "downloads real Cloudflare files; requires NR_TEST_UPSTREAM_ZIP"]
+    fn cloudflare_live_install_and_uninstall() {
+        let upstream = PathBuf::from(
+            std::env::var_os("NR_TEST_UPSTREAM_ZIP").expect("set NR_TEST_UPSTREAM_ZIP"),
+        );
+        assert_eq!(
+            sha256_file(&upstream).unwrap(),
+            "779b9b5f4d5756f663798e796c2974d09f05077bde9df1ff5ace31e087ce4dfe"
+        );
+        let root = std::env::temp_dir().join(format!(
+            "optinr-cdn-live-{}-{}",
+            std::process::id(),
+            crate::util::now_ms()
+        ));
+        let paths = AppPaths {
+            cache: root.join("cache"),
+            staging: root.join("staging"),
+            legacy_backups: root.join("backups"),
+            games: root.join("records"),
+            updates: root.join("updates"),
+            settings: root.join("settings.json"),
+            root: root.clone(),
+        };
+        let game_dir = root.join("game");
+        fs::create_dir_all(&game_dir).unwrap();
+        let exe = game_dir.join("CloudflareMigrationTest.exe");
+        // An inert PE header for the parser; this fixture is never executed.
+        let mut pe = vec![0u8; 512];
+        pe[0..2].copy_from_slice(b"MZ");
+        pe[0x3c..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        pe[0x80..0x84].copy_from_slice(b"PE\0\0");
+        pe[0x94..0x96].copy_from_slice(&0xf0u16.to_le_bytes());
+        pe[0x98..0x9a].copy_from_slice(&0x20bu16.to_le_bytes());
+        fs::write(&exe, &pe).unwrap();
+        let game = crate::games::inspect_manual(exe.clone()).unwrap();
+        let mut settings: Settings = serde_json::from_str(
+            r#"{"extras":{"version":"obsolete","url":"http://127.0.0.1:9/obsolete.zip"}}"#,
+        )
+        .unwrap();
+        settings.local_upstream_source = Some(upstream);
+        let partial_dir = paths.cache.join("extras/extras-v1");
+        fs::create_dir_all(&partial_dir).unwrap();
+        let response = crate::updates::http_client()
+            .unwrap()
+            .get(format!(
+                "{}{}",
+                fixed_extras().unwrap().base_url,
+                "extras-v1/MFGUnlocker.asi"
+            ))
+            .header("Range", "bytes=0-1048575")
+            .send()
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::PARTIAL_CONTENT);
+        let prefix = response.bytes().unwrap();
+        assert_eq!(prefix.len(), 1048576);
+        fs::write(partial_dir.join("MFGUnlocker.part"), prefix).unwrap();
+        let started = Instant::now();
+        let mut stages = Vec::new();
+        let components = prepare(&paths, &settings, None, true, |update| {
+            if stages.last() != Some(&update.stage) {
+                println!("{}: {}", update.stage, update.detail);
+                stages.push(update.stage);
+            }
+        })
+        .unwrap();
+        assert!(!stages.iter().any(|stage| stage == "解压固定资源"));
+        assert_eq!(components.extras_version, "extras-v1");
+        assert_eq!(fs::read_dir(&components.extras_root).unwrap().count(), 2);
+        let report = crate::install::install(&paths, &game, &components, |_| {}).unwrap();
+        println!(
+            "{}; Cloudflare preparation {:.1}s",
+            report.title,
+            started.elapsed().as_secs_f64()
+        );
+        let check = crate::install::check_install(&paths, &game).unwrap();
+        assert_eq!(check.title, "检查通过");
+        assert!(!game_dir.join("nvngx_dlssnr.dll").exists());
+        assert!(!game_dir.join("dlssnr_on_amd_weights.bin").exists());
+        for file in &fixed_extras().unwrap().files {
+            let deployed = if file.path == "MFGUnlocker.asi" {
+                "OptiScaler/plugins/MFGUnlocker.asi"
+            } else {
+                &file.path
+            };
+            assert_eq!(sha256_file(&game_dir.join(deployed)).unwrap(), file.sha256);
+        }
+        crate::install::uninstall(&paths, &game).unwrap();
+        assert_eq!(fs::read_dir(&game_dir).unwrap().count(), 1);
+        assert_eq!(fs::read(&exe).unwrap(), pe);
+        crate::util::remove_tree_safely(&root).unwrap();
+        println!("PASS: real CDN resume, installation, managed-file check, and uninstall");
+    }
+
+    #[test]
+    fn embedded_manifest_and_legacy_settings() {
+        let manifest = fixed_extras().unwrap();
+        assert_eq!(manifest.files.len(), 3);
+        assert!(
+            manifest
+                .base_url
+                .starts_with("https://downloads.bonvoyage.dpdns.org/")
+        );
+        for path in [
+            "../escape.bin",
+            "/absolute.bin",
+            "C:/absolute.bin",
+            "a%2fb.bin",
+            "a\\b.bin",
+        ] {
+            let mut bad = manifest.clone();
+            bad.files[0].path = path.into();
+            bad.files[0].key = format!("{}/{path}", bad.version);
+            assert!(validate_manifest(&bad).is_err(), "accepted {path}");
+        }
+        let mut bad = manifest.clone();
+        bad.files.pop();
+        assert!(validate_manifest(&bad).is_err());
+        let settings: Settings = serde_json::from_str(
+            r#"{"release_repo":"example/repo","extras":{"url":"https://old.example/extras.zip"},"local_extras_source":"local-resources"}"#,
+        ).unwrap();
+        assert_eq!(settings.release_repo, "example/repo");
+        assert_eq!(
+            settings.local_extras_source,
+            Some(PathBuf::from("local-resources"))
+        );
+        assert!(
+            serde_json::to_value(settings)
+                .unwrap()
+                .get("extras")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn direct_files_resume_reuse_and_stop_on_corruption() {
+        use sha2::Digest;
+        for corrupt in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "optinr-direct-{}-{}-{corrupt}",
+                std::process::id(),
+                crate::util::now_ms()
+            ));
+            fs::create_dir_all(&root).unwrap();
+            let mut manifest = fixed_extras().unwrap();
+            let bodies: Vec<Vec<u8>> = (0..3)
+                .map(|i| format!("resource-{i}").into_bytes())
+                .collect();
+            for (file, body) in manifest.files.iter_mut().zip(&bodies) {
+                file.size = body.len() as u64;
+                file.sha256 = crate::util::hex_lower(&sha2::Sha256::digest(body));
+            }
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            manifest.base_url = format!("http://{}/", listener.local_addr().unwrap());
+            let remote_files = manifest.files.clone();
+            let worker = std::thread::spawn(move || {
+                let mut requests = Vec::new();
+                let expected_requests = if corrupt { 4 } else { 3 };
+                let deadline = Instant::now() + Duration::from_secs(15);
+                while requests.len() < expected_requests {
+                    let (mut stream, _) = match listener.accept() {
+                        Ok(connection) => connection,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            assert!(Instant::now() < deadline, "missing HTTP requests");
+                            std::thread::sleep(Duration::from_millis(10));
+                            continue;
+                        }
+                        Err(error) => panic!("{error}"),
+                    };
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(5)))
+                        .unwrap();
+                    let mut request = String::new();
+                    let mut reader = BufReader::new(&mut stream);
+                    loop {
+                        let mut line = String::new();
+                        reader.read_line(&mut line).unwrap();
+                        if line == "\r\n" || line.is_empty() {
+                            break;
+                        }
+                        request.push_str(&line);
+                    }
+                    let index = remote_files
+                        .iter()
+                        .position(|file| request.starts_with(&format!("GET /{} ", file.key)))
+                        .unwrap();
+                    let body = if corrupt && index == 1 {
+                        vec![b'x'; bodies[index].len()]
+                    } else {
+                        bodies[index].clone()
+                    };
+                    let offset = if index == 0 {
+                        assert!(request.to_ascii_lowercase().contains("range: bytes=3-"));
+                        3
+                    } else {
+                        0
+                    };
+                    let range = if offset > 0 {
+                        format!(
+                            "Content-Range: bytes {offset}-{}/{}\r\n",
+                            body.len() - 1,
+                            body.len()
+                        )
+                    } else {
+                        String::new()
+                    };
+                    let status = if offset > 0 {
+                        "206 Partial Content"
+                    } else {
+                        "200 OK"
+                    };
+                    write!(stream, "HTTP/1.1 {status}\r\nContent-Length: {}\r\n{range}Connection: close\r\n\r\n", body.len() - offset).unwrap();
+                    stream.write_all(&body[offset..]).unwrap();
+                    requests.push(request);
+                }
+                requests
+            });
+            fs::write(
+                root.join(&manifest.files[0].path).with_extension("part"),
+                b"res",
+            )
+            .unwrap();
+            assert!(validate_extras(&root, &manifest).is_err());
+            let mut fractions = Vec::new();
+            let result = download_extras(&manifest, &root, &mut |update| {
+                assert_eq!(update.stage, "下载固定资源");
+                if let Some(fraction) = update.fraction {
+                    fractions.push(fraction);
+                }
+            });
+            let requests = worker.join().unwrap();
+            if corrupt {
+                assert!(result.unwrap_err().contains("SHA-256"));
+                assert!(!root.join(&manifest.files[2].path).exists());
+                assert!(validate_extras(&root, &manifest).is_err());
+                assert_eq!(requests.len(), 4);
+            } else {
+                result.unwrap();
+                validate_extras(&root, &manifest).unwrap();
+                assert_eq!(fractions.last(), Some(&1.0));
+                assert!(fractions.windows(2).all(|pair| pair[0] <= pair[1]));
+                // The server has exited: a second download must use verified files.
+                download_extras(&manifest, &root, &mut |_| {}).unwrap();
+                fs::write(root.join(&manifest.files[0].path), b"xxxxxxxxxx").unwrap();
+                assert!(validate_extras(&root, &manifest).is_err());
+                assert_eq!(requests.len(), 3);
+            }
+            crate::util::remove_tree_safely(&root).unwrap();
+        }
     }
 }
