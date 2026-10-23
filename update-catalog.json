@@ -9,16 +9,16 @@
     "notes": "OptiScaler NR Installer 0.2.2"
   },
   "upstream": {
-    "release_id": 415083241,
-    "tag": "v1.12.2",
-    "published_at": "2026-10-16T14:59:17Z",
+    "release_id": 422063325,
+    "tag": "v1.13.3",
+    "published_at": "2026-10-23T16:23:32Z",
     "asset": {
-      "id": 647670133,
-      "name": "OptScaler-NR-1.12.2.zip",
-      "size": 213639441,
-      "sha256": "779b9b5f4d5756f663798e796c2974d09f05077bde9df1ff5ace31e087ce4dfe",
-      "url": "https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/v1.12.2/OptScaler-NR-1.12.2.zip",
-      "updated_at": "2026-10-16T14:59:27Z"
+      "id": 669691746,
+      "name": "OptScaler-NR-1.13.3.zip",
+      "size": 215587465,
+      "sha256": "3a8bb595756bf91ff0a72bfd6af0007b7c2856b0658daa2770cb2c367553dd18",
+      "url": "https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/v1.13.3/OptScaler-NR-1.13.3.zip",
+      "updated_at": "2026-10-23T16:23:44Z"
     },
     "checked_at_ms": 0
   },
