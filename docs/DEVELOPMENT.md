@@ -12,7 +12,7 @@
 ## 本地检查
 
 ```powershell
-cargo test
+cargo test --locked
 cargo clippy --all-targets -- -D warnings
 cargo build --release --locked
 ```
@@ -42,7 +42,7 @@ cargo build --release --locked
 
 ## 构建期配置
 
-正式构建使用以下编译期变量。默认值定义在 `src/model.rs`。
+正式构建使用以下编译期变量。仓库默认值定义在 `src/model.rs`，更新验签公钥的默认值定义在 `src/catalog.rs`。
 
 | 变量 | 用途 |
 |---|---|
@@ -89,7 +89,7 @@ Wrangler 不在 PATH 中时，可通过 `-WranglerCommand @('C:\path\to\node.exe
 安装器下载完成后校验每个文件的大小与 SHA-256，并把 `dlssnr-int4.bin` 与主包的
 `model-tools/dlssnr-int4.sha256` 比较。主包更新导致模型不兼容时，安装器会停止并等待新的资源版本。
 
-上游主包及 REFramework 继续使用 ZIP；只有固定资源不再打包或解压。历史维护 ZIP 如需人工归档仍可执行 `scripts/package-extras.ps1 -SourceDir ...`，不参与客户端安装。云端结构与验收状态见 [Cloudflare 迁移记录](CLOUDFLARE-R2-MIGRATION.md)。
+上游主包及 REFramework 继续使用 ZIP；只有固定资源不再打包或解压。历史维护 ZIP 如需人工归档仍可执行 `scripts/package-extras.ps1 -SourceDir ...`，不参与客户端安装。对象路径与校验值直接读取 `release/extras-v1.json`，不额外维护云端配置快照或执行记录。
 
 ## 安装失败与存储清理
 
@@ -101,7 +101,7 @@ Wrangler 不在 PATH 中时，可通过 `-WranglerCommand @('C:\path\to\node.exe
 
 启动检查发现新安装器时打开更新弹窗。用户点击下载后，弹窗显示下载进度；替换完成后显示“重新启动”。重启按钮启动带 `--restart` 参数的新进程，新实例等待旧实例释放单实例锁后继续。
 
-组件主包不属于安装器自更新。首页只显示上游最新版本，主包在部署游戏时下载。已安装游戏出现新主包时使用主包更新模式，只替换上游管理的文件，保留固定资源、模型和 INI。
+组件主包不属于安装器自更新。首页只显示上游最新版本，主包在部署游戏时下载。已安装游戏出现新主包且模型选择不变时只更新主包，保留固定资源和用户偏好；更换模型选择时执行完整安装并调整受管模型文件。
 
 启动检查始终绕过清单缓存并刷新一次；网络失败时仍回退到已验证的签名缓存。游戏运行期间的手动检查继续遵守冷却时间。
 
@@ -114,7 +114,7 @@ Wrangler 不在 PATH 中时，可通过 `-WranglerCommand @('C:\path\to\node.exe
 ```powershell
 .\scripts\package-app.ps1 `
   -Exe .\target\release\OptiScalerNR.exe `
-  -Version 0.2.0 `
+  -Version 0.2.3 `
   -Repo DestinySail/optiscaler-nr-installer `
   -MinisignKey "C:\path\to\release.key" `
   -MinisignExe "C:\path\to\minisign.exe"
@@ -126,7 +126,7 @@ Wrangler 不在 PATH 中时，可通过 `-WranglerCommand @('C:\path\to\node.exe
 dist/OptiScalerNR.exe
 dist/update-manifest.json
 dist/update-manifest.json.minisig
-dist/app-v0.2.0.sha256
+dist/app-v0.2.3.sha256
 ```
 
 安装器只接受以下更新：
@@ -160,7 +160,7 @@ dist/app-v0.2.0.sha256
 
 Secret 不对访客公开，但拥有工作流修改权限的人或被攻破的工作流可能使用/窃取它。这把密钥同时具备签发安装器更新的权限，必须保护 GitHub 账号、限制仓库写权限，不能向 PR/不可信脚本暴露 Secret；疑似泄露时删除 Secret、轮换签名密钥并发布带新公钥的安装器。CI 凭证与私钥均不得提交到仓库。若不接受云端保存密钥，可关闭该工作流并在本地签署、发布清单。
 
-定时 Actions 可能延迟，Raw CDN 也可能短暂缓存旧文件或网络失败；这避免的是客户端匿名 Releases API 配额，不保证网络永远可用。发布新版安装器后应手动运行工作流并检查静态清单，确认 `installer.version` 指向新版本。
+定时 Actions 可能延迟，Raw CDN 也可能短暂缓存旧文件或网络失败；这避免的是客户端匿名 Releases API 配额，不保证网络永远可用。发布新版安装器后检查对应的更新目录工作流；未触发或失败时手动运行。回读公开清单并验签，确认 `installer.version` 和 EXE 哈希指向新版本。
 
 ## 模型选择
 

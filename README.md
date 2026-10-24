@@ -64,8 +64,7 @@
 
 ## 兼容性与风险
 
-- 鸣潮的游戏发现和安装路径已在本机验证；本轮没有启动游戏做 NR/XeFG 画面验收。
-- 其他自动发现的游戏会显示为“候选”，在实际游戏内验证前不能视为已支持。
+- 自动发现的游戏会显示为“候选”，在实际游戏内验证前不能视为已支持。
 - “发现游戏”“允许安装”“游戏内实测通过”是三种不同状态。
 - 联网游戏的反作弊提示必须立即停用本方案；本项目不提供绕过。
 - 固定资源从 Cloudflare 逐文件下载，并按安装器内置清单校验大小与 SHA-256，无需解压资源包。模型和二进制继续适用各自上游许可证，详见[来源与第三方组件](docs/THIRD_PARTY.md)和[资源来源说明](https://downloads.bonvoyage.dpdns.org/optiscaler-nr/extras-v1/EXTRAS-NOTICES.md)。
@@ -88,7 +87,6 @@ cargo build --release --locked
 - [开发、测试与发布](docs/DEVELOPMENT.md)
 - [兼容范围](docs/GAME-COMPATIBILITY.md)
 - [第三方来源与许可证](docs/THIRD_PARTY.md)
-- [当前实施与验证状态](docs/IMPLEMENTATION-STATUS.md)
 
 ## 参与贡献
 

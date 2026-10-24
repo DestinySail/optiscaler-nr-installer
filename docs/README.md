@@ -7,8 +7,7 @@
 | [DEVELOPMENT.md](DEVELOPMENT.md) | 构建、测试、资源打包、安装器发布 |
 | [GAME-COMPATIBILITY.md](GAME-COMPATIBILITY.md) | 查看硬件前提、游戏状态和游戏内检查 |
 | [THIRD_PARTY.md](THIRD_PARTY.md) | 查询第三方来源、仓库地址和许可证 |
-| [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md) | 查看当前验证范围、产物摘要和未完成事项 |
-| [REVIEW-2026-10-18.md](REVIEW-2026-10-18.md) | 安装安全审查、文案调整及精简实施方案 |
-| [CLOUDFLARE-R2-MIGRATION.md](CLOUDFLARE-R2-MIGRATION.md) | 固定资源迁移至 Cloudflare R2 的实施记录、发布流程与验收条件 |
+
+本目录只保留面向使用者和维护者的长期说明。临时方案、审查过程、会话总结、本机配置与操作日志保存在仓库外；可复用的结论合并到对应主题页，版本变更写入发布说明。提交前检查暂存差异，避免把过程记录、个人路径或凭据纳入公开文档。
 
 发布说明位于 [`release/notes/`](../release/notes/)。

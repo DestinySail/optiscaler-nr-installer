@@ -19,7 +19,15 @@
 | Intel XeSS | [intel/xess](https://github.com/intel/xess) | 以随包许可证为准 |
 | REFramework nightly | [praydog/REFramework-nightly](https://github.com/praydog/REFramework-nightly) | 许可见上游；安装器只部署 `dinput8.dll` |
 
-`nvngx_dlssnr.dll` 是 NVIDIA 专有运行库，没有对应的开源仓库。它是提取 Mochizuki 模型的源材料，与 Daniel 权重一起单独存档在 Cloudflare；安装器只下载生成好的模型和 XeFG 插件。源码追踪和提取验证见 [DLL 用途核查](CLOUDFLARE-R2-MIGRATION.md#nvngx_dlssnrdll-的完整用途核查)。NVIDIA 运行库和由它生成的模型权重是否允许再分发，需要在发布资源前确认。
+`nvngx_dlssnr.dll` 是 NVIDIA 专有运行库，是模型提取的源材料。安装器只部署生成好的模型和 XeFG 插件，不把 NVIDIA 源 DLL 或 Daniel 权重复制到游戏目录。NVIDIA 运行库和由它生成的模型权重是否允许再分发，需要在发布资源前确认。
+
+Mochizuki 模型的生成关系：
+
+- 原模型 `dlssnr.bin`：从 310.8.0 或 310.9.16 的 `WEIGHTS_HT` 资源提取；两个来源生成的原模型相同。
+- INT4 `dlssnr-int4.bin`：由原模型及上游 INT4 工具生成，仅用于原模型。
+- Small `dlssnr-small.bin`：从 310.9.16 的 `WEIGHTS_CC_SMALL_FP8` 资源提取，不支持 INT4。
+
+提取与验证方法见[上游 Mochizuki 安装说明](https://github.com/TheAutomatic/dlss-5-amd-project/blob/v1.13.3/docs/mochizuki.md)。安装器使用的文件路径、大小、SHA-256 和维护源材料列于 [release/extras-v1.json](../release/extras-v1.json)，不在文档中重复维护哈希表。
 
 ## 安装器直接依赖
 
@@ -38,4 +46,4 @@
 | [zip-rs/zip2](https://github.com/zip-rs/zip2) | ZIP 解压 | MIT |
 | [gentoo90/winreg-rs](https://github.com/gentoo90/winreg-rs) | Windows 安装记录读取 | MIT |
 
-完整的运行时许可证和署名文件随主包及资源包发布。资源包的来源说明在 [release/EXTRAS-NOTICES.md](../release/EXTRAS-NOTICES.md)。
+完整的运行时许可证和署名文件随主包及资源包发布。既有资源附带的原始来源说明保留在 [release/EXTRAS-NOTICES.md](../release/EXTRAS-NOTICES.md)，以匹配清单中的已发布文件；当前安装范围以资源清单为准。
