@@ -57,20 +57,21 @@ cargo build --release --locked
 
 源码仓库只提交清单、脚本和说明，不提交大体积模型。固定资源以原始文件发布到 Cloudflare R2，通过 `downloads.bonvoyage.dpdns.org` 下载。
 
-必装资源：
+安装资源（按模型选择下载）：
 
 - `MFGUnlocker.asi`
 - `dlssnr-amd/dlssnr.bin`
 - `dlssnr-amd/dlssnr-int4.bin`
+- `dlssnr-amd/dlssnr-small.bin`
 
 维护存档：
 
 - `nvngx_dlssnr.dll`
 - `dlssnr_on_amd_weights.bin`
 
-`release/extras-v1.json` 是唯一配置来源，安装器编译时内置其中的 `files` 列表；`sources` 只供发布脚本存档源材料和许可说明。每项都有路径、R2 key、大小与 SHA-256。修改资源时更新这份清单并发布新版安装器，不再设置 `NR_EXTRAS_*` 编译变量。旧设置文件的单 ZIP `extras` 字段会被忽略；本地资源导入只接受包含这三个文件的目录。
+`release/extras-v1.json` 是唯一配置来源，安装器编译时内置其中的 `files` 列表；`sources` 只供发布脚本存档源材料和许可说明。每项都有路径、R2 key、大小与 SHA-256。修改资源时更新这份清单并发布新版安装器，不再设置 `NR_EXTRAS_*` 编译变量。旧设置文件的单 ZIP `extras` 字段会被忽略；本地资源导入只接受目录，目录内须包含 XeFG 插件及所选模型。
 
-准备包含五个二进制文件及原始 `EXTRAS-NOTICES.md` 的源目录，然后验证、上传和公开回读检查：
+准备包含清单全部 `files` 和 `sources` 二进制文件及原始 `EXTRAS-NOTICES.md` 的源目录，然后验证、上传和公开回读检查：
 
 ```powershell
 .\scripts\publish-extras-r2.ps1 -SourceDir "C:\path\to\extras-source" -CheckOnly
@@ -160,3 +161,20 @@ dist/app-v0.2.0.sha256
 Secret 不对访客公开，但拥有工作流修改权限的人或被攻破的工作流可能使用/窃取它。这把密钥同时具备签发安装器更新的权限，必须保护 GitHub 账号、限制仓库写权限，不能向 PR/不可信脚本暴露 Secret；疑似泄露时删除 Secret、轮换签名密钥并发布带新公钥的安装器。CI 凭证与私钥均不得提交到仓库。若不接受云端保存密钥，可关闭该工作流并在本地签署、发布清单。
 
 定时 Actions 可能延迟，Raw CDN 也可能短暂缓存旧文件或网络失败；这避免的是客户端匿名 Releases API 配额，不保证网络永远可用。发布新版安装器后应手动运行工作流并检查静态清单，确认 `installer.version` 指向新版本。
+
+## 模型选择
+
+安装页支持 310.8.0 原模型、310.9.16 Small 和双模型。`ModelSelection` 贯穿资源准备、文件计划、INI 合并与安装记录；旧记录缺少 `models` 时按原模型处理。固定清单 `release/extras-v1.json` 当前资源集为 `extras-v2`，保留原三个资源的不可变 `extras-v1` 对象路径，只新增 `extras-v2/dlssnr-amd/dlssnr-small.bin`。
+
+Small 来源为官方 NVIDIA DLL 310.9.16，使用上游 v1.13.3 包内 `mochizuki-model.py --models small` 提取；清单固定其大小与完整 SHA-256。主包必须含 `model-tools/descriptor-small.json` 才允许选择 Small；安装原模型仍校验主包的 INT4 哈希。导入资源目录只要求所选模型及 MFGUnlocker，不要求未选模型。
+
+命令行也可指定模型，修复不指定时沿用安装记录：
+
+```powershell
+OptiScalerNR.exe --install 'D:\Game\Game.exe' --models 310.8.0
+OptiScalerNR.exe --install 'D:\Game\Game.exe' --models 310.9.16
+OptiScalerNR.exe --install 'D:\Game\Game.exe' --models both
+OptiScalerNR.exe --repair 'D:\Game\Game.exe'
+```
+
+`cargo test --locked` 覆盖三种模型的下载筛选、哈希失败、安装切换、主包更新、配置保留和卸载；这些检查不代表游戏内画质、性能或稳定性通过。

@@ -1,5 +1,5 @@
 {
-  "version": "extras-v1",
+  "version": "extras-v2",
   "base_url": "https://downloads.bonvoyage.dpdns.org/optiscaler-nr/",
   "files": [
     {
@@ -19,6 +19,12 @@
       "key": "extras-v1/dlssnr-amd/dlssnr-int4.bin",
       "size": 53211392,
       "sha256": "22a0e2d3db1c2101a67e0d9aad066e0916afbc32cba47820f5ad24d46602319c"
+    },
+    {
+      "path": "dlssnr-amd/dlssnr-small.bin",
+      "key": "extras-v2/dlssnr-amd/dlssnr-small.bin",
+      "size": 113917248,
+      "sha256": "7e966e2639dbec6596aa0bac3b8761137d2c40ca8cb4aca30df7ca10043c6e33"
     }
   ],
   "sources": [

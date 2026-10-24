@@ -169,6 +169,7 @@ fn headless_install(exe: std::path::PathBuf, args: &[String]) -> Result<(), Stri
                 .ok_or_else(|| "--extras 后需要固定资源目录路径".to_string())?,
         ));
     }
+    settings.models = parse_models(args)?.unwrap_or(settings.models);
     let game = games::inspect_manual(exe)?;
     let upstream = updates::check_upstream(&paths, &settings).ok();
     let mut last_stage = String::new();
@@ -205,6 +206,8 @@ fn headless_maintenance(
             reframework::install(&paths, &settings, &game, |_| {})?
         }
         model::Action::Repair | model::Action::Update => {
+            settings.models =
+                parse_models(args)?.unwrap_or(install::load_record(&paths, &game)?.models);
             if let Some(index) = args.iter().position(|arg| arg == "--upstream") {
                 settings.local_upstream_source = Some(std::path::PathBuf::from(
                     args.get(index + 1)
@@ -230,5 +233,39 @@ fn print_report(report: model::MaintenanceReport) {
     println!("{}", report.title);
     for line in report.lines {
         println!("{line}");
+    }
+}
+
+fn parse_models(args: &[String]) -> Result<Option<model::ModelSelection>, String> {
+    let Some(index) = args.iter().position(|arg| arg == "--models") else {
+        return Ok(None);
+    };
+    match args.get(index + 1).map(String::as_str) {
+        Some("310.8.0" | "original") => Ok(Some(model::ModelSelection::Original)),
+        Some("310.9.16" | "small") => Ok(Some(model::ModelSelection::Small)),
+        Some("both") => Ok(Some(model::ModelSelection::Both)),
+        _ => Err("--models 后需要 310.8.0、310.9.16 或 both".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+
+    #[test]
+    fn validates_model_arguments() {
+        assert_eq!(parse_models(&[]).unwrap(), None);
+        for (value, expected) in [
+            ("310.8.0", model::ModelSelection::Original),
+            ("310.9.16", model::ModelSelection::Small),
+            ("both", model::ModelSelection::Both),
+        ] {
+            assert_eq!(
+                parse_models(&["--models".into(), value.into()]).unwrap(),
+                Some(expected)
+            );
+        }
+        assert!(parse_models(&["--models".into()]).is_err());
+        assert!(parse_models(&["--models".into(), "typo".into()]).is_err());
     }
 }

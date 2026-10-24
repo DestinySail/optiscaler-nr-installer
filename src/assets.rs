@@ -2,12 +2,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::archive::{extract_zip, find_release_root, read_small_text};
-use crate::model::{AppPaths, ExtrasManifest, Progress, Settings, UpstreamRelease};
+use crate::model::{AppPaths, ExtrasManifest, ModelSelection, Progress, Settings, UpstreamRelease};
 use crate::updates::{check_upstream, download_verified, load_cached_upstream};
 use crate::util::{format_bytes, remove_tree_safely, safe_relative, sha256_file};
 
 #[derive(Debug, Clone)]
 pub struct PreparedComponents {
+    pub models: ModelSelection,
     pub release_root: PathBuf,
     pub extras_root: PathBuf,
     pub upstream_tag: String,
@@ -73,7 +74,7 @@ pub fn prepare(
         &mut progress,
     )?;
     let release_root = find_release_root(&release_root)?;
-    validate_release(&release_root)?;
+    validate_release(&release_root, settings.models)?;
     let actual_version = read_small_text(&release_root.join("VERSION"), 1024)
         .ok()
         .map(|v| v.trim().to_string())
@@ -95,17 +96,18 @@ pub fn prepare(
                 (source.to_path_buf(), "local".to_string())
             } else {
                 let destination = paths.cache.join("extras").join(&manifest.version);
-                download_extras(&manifest, &destination, &mut progress)?;
+                download_extras(&manifest, &destination, settings.models, &mut progress)?;
                 (destination, manifest.version.clone())
             };
-        validate_extras(&extras_root, &manifest)?;
-        validate_model_compatibility(&release_root, &extras_root)?;
+        validate_extras(&extras_root, &manifest, settings.models)?;
+        validate_model_compatibility(&release_root, &extras_root, settings.models)?;
         (extras_root, extras_version)
     } else {
         (PathBuf::new(), String::new())
     };
 
     Ok(PreparedComponents {
+        models: settings.models,
         release_root,
         extras_root,
         upstream_tag,
@@ -147,7 +149,16 @@ fn validate_manifest(manifest: &ExtrasManifest) -> Result<(), String> {
             }
         }
         if !paths.insert(file.path.as_str())
-            || file.key != format!("{}/{}", manifest.version, file.path)
+            || file.key
+                != format!(
+                    "{}/{}",
+                    if file.path.ends_with("dlssnr-small.bin") {
+                        "extras-v2"
+                    } else {
+                        "extras-v1"
+                    },
+                    file.path
+                )
             || file.size == 0
             || file.sha256.len() != 64
             || !file.sha256.bytes().all(|c| c.is_ascii_hexdigit())
@@ -159,9 +170,10 @@ fn validate_manifest(manifest: &ExtrasManifest) -> Result<(), String> {
         "MFGUnlocker.asi",
         "dlssnr-amd/dlssnr.bin",
         "dlssnr-amd/dlssnr-int4.bin",
+        "dlssnr-amd/dlssnr-small.bin",
     ];
     if paths != required.into_iter().collect() {
-        return Err("固定资源清单必须包含且只包含三个安装文件".to_string());
+        return Err("固定资源清单必须包含且只包含四个安装文件".to_string());
     }
     Ok(())
 }
@@ -169,9 +181,15 @@ fn validate_manifest(manifest: &ExtrasManifest) -> Result<(), String> {
 fn download_extras(
     manifest: &ExtrasManifest,
     destination: &Path,
+    models: ModelSelection,
     progress: &mut impl FnMut(Progress),
 ) -> Result<(), String> {
-    for (index, file) in manifest.files.iter().enumerate() {
+    let files: Vec<_> = manifest
+        .files
+        .iter()
+        .filter(|file| models.includes(&file.path))
+        .collect();
+    for (index, file) in files.iter().enumerate() {
         download_verified(
             &format!("{}{}", manifest.base_url, file.key),
             &destination.join(safe_relative(Path::new(&file.path))?),
@@ -184,13 +202,13 @@ fn download_extras(
                     format!(
                         "{}/{} · {} · {}",
                         index + 1,
-                        manifest.files.len(),
+                        files.len(),
                         file.path,
                         update.detail
                     ),
                     update
                         .fraction
-                        .map(|fraction| (index as f32 + fraction) / manifest.files.len() as f32),
+                        .map(|fraction| (index as f32 + fraction) / files.len() as f32),
                 ));
             },
         )?;
@@ -225,7 +243,7 @@ fn materialize(
     Ok(destination)
 }
 
-fn validate_release(root: &Path) -> Result<(), String> {
+fn validate_release(root: &Path, models: ModelSelection) -> Result<(), String> {
     let required = [
         "OptiScaler.dll",
         "OptiScaler.ini",
@@ -239,11 +257,25 @@ fn validate_release(root: &Path) -> Result<(), String> {
             return Err(format!("主组件缺少 {item}: {}", root.display()));
         }
     }
+    if models != ModelSelection::Original {
+        let descriptor = root.join("model-tools/descriptor-small.json");
+        if !descriptor.is_file() {
+            return Err("所选主包不支持 310.9.16 新模型，请更新至 v1.13.3 或更新版本".to_string());
+        }
+    }
     Ok(())
 }
 
-fn validate_extras(root: &Path, manifest: &ExtrasManifest) -> Result<(), String> {
-    for file in &manifest.files {
+fn validate_extras(
+    root: &Path,
+    manifest: &ExtrasManifest,
+    models: ModelSelection,
+) -> Result<(), String> {
+    for file in manifest
+        .files
+        .iter()
+        .filter(|file| models.includes(&file.path))
+    {
         let path = root.join(safe_relative(Path::new(&file.path))?);
         if !path.is_file() {
             return Err(format!("固定资源缺少 {}: {}", file.path, root.display()));
@@ -257,7 +289,14 @@ fn validate_extras(root: &Path, manifest: &ExtrasManifest) -> Result<(), String>
     Ok(())
 }
 
-fn validate_model_compatibility(release_root: &Path, extras_root: &Path) -> Result<(), String> {
+fn validate_model_compatibility(
+    release_root: &Path,
+    extras_root: &Path,
+    models: ModelSelection,
+) -> Result<(), String> {
+    if models == ModelSelection::Small {
+        return Ok(());
+    }
     let checksum_path = release_root.join("model-tools").join("dlssnr-int4.sha256");
     let checksum = read_small_text(&checksum_path, 4096)?;
     let expected = checksum
@@ -344,7 +383,7 @@ mod tests {
         )
         .unwrap();
         settings.local_upstream_source = Some(upstream);
-        let partial_dir = paths.cache.join("extras/extras-v1");
+        let partial_dir = paths.cache.join("extras/extras-v2");
         fs::create_dir_all(&partial_dir).unwrap();
         let response = crate::updates::http_client()
             .unwrap()
@@ -370,7 +409,7 @@ mod tests {
         })
         .unwrap();
         assert!(!stages.iter().any(|stage| stage == "解压固定资源"));
-        assert_eq!(components.extras_version, "extras-v1");
+        assert_eq!(components.extras_version, "extras-v2");
         assert_eq!(fs::read_dir(&components.extras_root).unwrap().count(), 2);
         let report = crate::install::install(&paths, &game, &components, |_| {}).unwrap();
         println!(
@@ -382,7 +421,12 @@ mod tests {
         assert_eq!(check.title, "检查通过");
         assert!(!game_dir.join("nvngx_dlssnr.dll").exists());
         assert!(!game_dir.join("dlssnr_on_amd_weights.bin").exists());
-        for file in &fixed_extras().unwrap().files {
+        for file in fixed_extras()
+            .unwrap()
+            .files
+            .iter()
+            .filter(|file| settings.models.includes(&file.path))
+        {
             let deployed = if file.path == "MFGUnlocker.asi" {
                 "OptiScaler/plugins/MFGUnlocker.asi"
             } else {
@@ -398,9 +442,41 @@ mod tests {
     }
 
     #[test]
+    fn selected_models_require_compatible_runtime_and_int4() {
+        let root = std::env::temp_dir().join(format!(
+            "optinr-compat-{}-{}",
+            std::process::id(),
+            crate::util::now_ms()
+        ));
+        fs::create_dir_all(root.join("model-tools")).unwrap();
+        for dir in ["OptiScaler", "dlssnr-amd", "person-model"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        for file in ["OptiScaler.dll", "OptiScaler.ini", "MochizukiNrRuntime.dll"] {
+            fs::write(root.join(file), "runtime").unwrap();
+        }
+        assert!(validate_release(&root, ModelSelection::Small).is_err());
+        fs::write(root.join("model-tools/descriptor-small.json"), "{}").unwrap();
+        validate_model_compatibility(&root, &root, ModelSelection::Small).unwrap();
+        assert!(validate_model_compatibility(&root, &root, ModelSelection::Both).is_err());
+        validate_release(&root, ModelSelection::Both).unwrap();
+        let int4 = root.join("dlssnr-amd/dlssnr-int4.bin");
+        fs::write(&int4, "weights").unwrap();
+        fs::write(
+            root.join("model-tools/dlssnr-int4.sha256"),
+            sha256_file(&int4).unwrap(),
+        )
+        .unwrap();
+        validate_model_compatibility(&root, &root, ModelSelection::Both).unwrap();
+        fs::write(&int4, "corrupt").unwrap();
+        assert!(validate_model_compatibility(&root, &root, ModelSelection::Both).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn embedded_manifest_and_legacy_settings() {
         let manifest = fixed_extras().unwrap();
-        assert_eq!(manifest.files.len(), 3);
+        assert_eq!(manifest.files.len(), 4);
         assert!(
             manifest
                 .base_url
@@ -440,15 +516,21 @@ mod tests {
     #[test]
     fn direct_files_resume_reuse_and_stop_on_corruption() {
         use sha2::Digest;
-        for corrupt in [false, true] {
+        for (models, corrupt) in [
+            (ModelSelection::Original, false),
+            (ModelSelection::Small, false),
+            (ModelSelection::Both, false),
+            (ModelSelection::Original, true),
+        ] {
             let root = std::env::temp_dir().join(format!(
-                "optinr-direct-{}-{}-{corrupt}",
+                "optinr-direct-{}-{}-{models:?}-{corrupt}",
                 std::process::id(),
                 crate::util::now_ms()
             ));
             fs::create_dir_all(&root).unwrap();
             let mut manifest = fixed_extras().unwrap();
-            let bodies: Vec<Vec<u8>> = (0..3)
+            manifest.files.retain(|file| models.includes(&file.path));
+            let bodies: Vec<Vec<u8>> = (0..manifest.files.len())
                 .map(|i| format!("resource-{i}").into_bytes())
                 .collect();
             for (file, body) in manifest.files.iter_mut().zip(&bodies) {
@@ -461,7 +543,7 @@ mod tests {
             let remote_files = manifest.files.clone();
             let worker = std::thread::spawn(move || {
                 let mut requests = Vec::new();
-                let expected_requests = if corrupt { 4 } else { 3 };
+                let expected_requests = if corrupt { 4 } else { remote_files.len() };
                 let deadline = Instant::now() + Duration::from_secs(15);
                 while requests.len() < expected_requests {
                     let (mut stream, _) = match listener.accept() {
@@ -473,6 +555,7 @@ mod tests {
                         }
                         Err(error) => panic!("{error}"),
                     };
+                    stream.set_nonblocking(false).unwrap();
                     stream
                         .set_read_timeout(Some(Duration::from_secs(5)))
                         .unwrap();
@@ -526,9 +609,9 @@ mod tests {
                 b"res",
             )
             .unwrap();
-            assert!(validate_extras(&root, &manifest).is_err());
+            assert!(validate_extras(&root, &manifest, models).is_err());
             let mut fractions = Vec::new();
-            let result = download_extras(&manifest, &root, &mut |update| {
+            let result = download_extras(&manifest, &root, models, &mut |update| {
                 assert_eq!(update.stage, "下载固定资源");
                 if let Some(fraction) = update.fraction {
                     fractions.push(fraction);
@@ -538,18 +621,18 @@ mod tests {
             if corrupt {
                 assert!(result.unwrap_err().contains("SHA-256"));
                 assert!(!root.join(&manifest.files[2].path).exists());
-                assert!(validate_extras(&root, &manifest).is_err());
+                assert!(validate_extras(&root, &manifest, models).is_err());
                 assert_eq!(requests.len(), 4);
             } else {
                 result.unwrap();
-                validate_extras(&root, &manifest).unwrap();
+                validate_extras(&root, &manifest, models).unwrap();
                 assert_eq!(fractions.last(), Some(&1.0));
                 assert!(fractions.windows(2).all(|pair| pair[0] <= pair[1]));
                 // The server has exited: a second download must use verified files.
-                download_extras(&manifest, &root, &mut |_| {}).unwrap();
+                download_extras(&manifest, &root, models, &mut |_| {}).unwrap();
                 fs::write(root.join(&manifest.files[0].path), b"xxxxxxxxxx").unwrap();
-                assert!(validate_extras(&root, &manifest).is_err());
-                assert_eq!(requests.len(), 3);
+                assert!(validate_extras(&root, &manifest, models).is_err());
+                assert_eq!(requests.len(), manifest.files.len());
             }
             crate::util::remove_tree_safely(&root).unwrap();
         }

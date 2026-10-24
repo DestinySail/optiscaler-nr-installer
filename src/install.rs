@@ -46,6 +46,13 @@ pub fn install(
     if !include_extras && existing_record.is_none() {
         return Err("主包更新需要已有安装记录".to_string());
     }
+    if !include_extras
+        && existing_record
+            .as_ref()
+            .is_some_and(|record| record.models != components.models)
+    {
+        return Err("更换模型需要完整安装，不能仅更新主包".to_string());
+    }
     let extras_version = if include_extras {
         Some(components.extras_version.clone())
     } else {
@@ -113,6 +120,7 @@ pub fn install(
         }
     }
     let partial_record = InstallRecord {
+        models: components.models,
         schema: 2,
         game_name: game.name.clone(),
         exe: game.exe.clone(),
@@ -166,7 +174,7 @@ pub fn install(
             "合并 Mochizuki NR 与 XeFG 固定配置",
             Some(0.88),
         ));
-        ini::apply_fixed_profile(&ini_path, false, ini_existed)?;
+        ini::apply_fixed_profile(&ini_path, false, ini_existed, Some(components.models))?;
 
         progress(Progress::new("验证", "校验所有受管文件", Some(0.94)));
         let mut managed = Vec::new();
@@ -222,6 +230,7 @@ pub fn install(
             ));
         }
         let record = InstallRecord {
+            models: components.models,
             schema: 2,
             game_name: game.name.clone(),
             exe: game.exe.clone(),
@@ -240,6 +249,7 @@ pub fn install(
                 format!("游戏：{}", game.name),
                 format!("组件：{}", components.upstream_tag),
                 format!("代理：{proxy}"),
+                format!("模型：{}", components.models.label()),
                 format!(
                     "固定资源：{}",
                     extras_version.as_deref().unwrap_or("保持不变")
@@ -281,7 +291,7 @@ pub fn check_install(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceRep
         }
         if file.relative_path.eq_ignore_ascii_case("OptiScaler.ini") {
             issues.extend(
-                ini::check_fixed_profile(&target)?
+                ini::check_fixed_profile(&target, Some(record.models))?
                     .into_iter()
                     .map(|issue| format!("OptiScaler.ini：{issue}")),
             );
@@ -375,7 +385,7 @@ pub fn disable_frame_gen(paths: &AppPaths, game: &GameInfo) -> Result<Maintenanc
         });
         lines.push("已移出 MFGUnlocker.asi".to_string());
     }
-    ini::apply_fixed_profile(&ini_path, true, true)?;
+    ini::apply_fixed_profile(&ini_path, true, true, None)?;
     if let Some(ini_entry) = record
         .files
         .iter_mut()
@@ -498,7 +508,7 @@ fn count_files(root: &Path) -> usize {
     count
 }
 
-fn load_record(paths: &AppPaths, game: &GameInfo) -> Result<InstallRecord, String> {
+pub fn load_record(paths: &AppPaths, game: &GameInfo) -> Result<InstallRecord, String> {
     let path = paths.games.join(game_id(&game.exe)).join("record.json");
     if !path.is_file() {
         return Err("这个游戏还没有本程序的安装记录".to_string());
@@ -538,22 +548,22 @@ fn build_plan(components: &PreparedComponents, proxy: &str) -> Result<Vec<Planne
         &components.release_root.join("person-model"),
         "person-model",
     )?;
+    files.retain(|file| !is_extras_file(&file.relative));
     if !components.extras_root.as_os_str().is_empty() {
         add(
             &mut files,
             &components.extras_root.join("MFGUnlocker.asi"),
             "OptiScaler/plugins/MFGUnlocker.asi",
         )?;
-        add(
-            &mut files,
-            &components.extras_root.join("dlssnr-amd/dlssnr.bin"),
+        for relative in [
             "dlssnr-amd/dlssnr.bin",
-        )?;
-        add(
-            &mut files,
-            &components.extras_root.join("dlssnr-amd/dlssnr-int4.bin"),
             "dlssnr-amd/dlssnr-int4.bin",
-        )?;
+            "dlssnr-amd/dlssnr-small.bin",
+        ] {
+            if components.models.includes(relative) {
+                add(&mut files, &components.extras_root.join(relative), relative)?;
+            }
+        }
     }
     let mut by_path = BTreeMap::new();
     for file in files {
@@ -568,6 +578,7 @@ fn is_extras_file(relative: &str) -> bool {
         "optiscaler/plugins/mfgunlocker.asi"
             | "dlssnr-amd/dlssnr.bin"
             | "dlssnr-amd/dlssnr-int4.bin"
+            | "dlssnr-amd/dlssnr-small.bin"
     )
 }
 
@@ -781,6 +792,7 @@ fn ensure_no_reparse_between(base: &Path, target: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ModelSelection;
 
     fn test_dir(name: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("optinr-{}-{name}", std::process::id()));
@@ -791,6 +803,7 @@ mod tests {
 
     fn record(files: &[&str]) -> InstallRecord {
         InstallRecord {
+            models: ModelSelection::Original,
             schema: 2,
             game_name: "Test".to_string(),
             exe: PathBuf::from("Test.exe"),
@@ -900,6 +913,117 @@ mod tests {
     }
 
     #[test]
+    fn model_install_switch_update_and_uninstall() {
+        let root = test_dir("model-selection");
+        let paths = AppPaths {
+            cache: root.join("cache"),
+            staging: root.join("staging"),
+            legacy_backups: root.join("backups"),
+            games: root.join("records"),
+            updates: root.join("updates"),
+            settings: root.join("settings.json"),
+            root: root.clone(),
+        };
+        let release = root.join("release");
+        let extras = root.join("extras");
+        for dir in ["OptiScaler", "dlssnr-amd", "person-model"] {
+            fs::create_dir_all(release.join(dir)).unwrap();
+            fs::write(release.join(dir).join("asset"), "asset").unwrap();
+        }
+        fs::write(release.join("OptiScaler.dll"), "OptiScaler runtime").unwrap();
+        fs::write(
+            release.join("OptiScaler.ini"),
+            "[DlssNr]\nMochizukiNetworkModel=1\n",
+        )
+        .unwrap();
+        fs::write(release.join("MochizukiNrRuntime.dll"), "runtime").unwrap();
+        fs::create_dir_all(extras.join("dlssnr-amd")).unwrap();
+        fs::write(extras.join("MFGUnlocker.asi"), "plugin").unwrap();
+        let weights = [
+            "dlssnr-amd/dlssnr.bin",
+            "dlssnr-amd/dlssnr-int4.bin",
+            "dlssnr-amd/dlssnr-small.bin",
+        ];
+        for relative in weights {
+            fs::write(extras.join(relative), relative).unwrap();
+        }
+        // Imported main packages may contain weights: selection must still filter them.
+        for relative in weights {
+            fs::write(release.join(relative), "unselected").unwrap();
+        }
+        let game_dir = root.join("game");
+        fs::create_dir(&game_dir).unwrap();
+        let exe = game_dir.join("ModelSelectionTest.exe");
+        fs::write(&exe, "inert game fixture").unwrap();
+        fs::write(game_dir.join("user.txt"), "keep").unwrap();
+        let game = GameInfo {
+            launcher: "test".into(),
+            name: "Models".into(),
+            exe,
+            game_dir: game_dir.clone(),
+            architecture: Some(64),
+            imports: vec![],
+            compatibility: crate::model::Compatibility::Manual,
+        };
+        let mut components = PreparedComponents {
+            models: ModelSelection::Original,
+            release_root: release,
+            extras_root: extras,
+            upstream_tag: "1.13.3".into(),
+            extras_version: "extras-v2".into(),
+        };
+        for models in [
+            ModelSelection::Original,
+            ModelSelection::Both,
+            ModelSelection::Small,
+            ModelSelection::Original,
+        ] {
+            components.models = models;
+            install(&paths, &game, &components, |_| {}).unwrap();
+            assert_eq!(load_record(&paths, &game).unwrap().models, models);
+            for relative in weights {
+                assert_eq!(
+                    game_dir.join(relative).is_file(),
+                    models.includes(relative),
+                    "{models:?}: {relative}"
+                );
+                if models.includes(relative) {
+                    assert_eq!(
+                        fs::read_to_string(game_dir.join(relative)).unwrap(),
+                        relative
+                    );
+                }
+            }
+            let config = fs::read_to_string(game_dir.join("OptiScaler.ini")).unwrap();
+            let active = if models == ModelSelection::Small {
+                "1"
+            } else {
+                "0"
+            };
+            assert!(config.contains(&format!("MochizukiNetworkModel={active}")));
+            assert_eq!(check_install(&paths, &game).unwrap().title, "检查通过");
+            let mut main_only = components.clone();
+            main_only.extras_root = PathBuf::new();
+            install(&paths, &game, &main_only, |_| {}).unwrap();
+            assert_eq!(check_install(&paths, &game).unwrap().title, "检查通过");
+        }
+        disable_frame_gen(&paths, &game).unwrap();
+        assert!(
+            fs::read_to_string(game_dir.join("OptiScaler.ini"))
+                .unwrap()
+                .contains("MochizukiNetworkModel=0")
+        );
+        uninstall(&paths, &game).unwrap();
+        assert!(game.exe.is_file());
+        assert_eq!(
+            fs::read_to_string(game_dir.join("user.txt")).unwrap(),
+            "keep"
+        );
+        assert_eq!(fs::read_dir(&game_dir).unwrap().count(), 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn main_package_plan_skips_fixed_extras() {
         let root = test_dir("main-only-plan");
         let release = root.join("release");
@@ -913,6 +1037,7 @@ mod tests {
         fs::write(release.join("dlssnr-amd").join("file"), "file").unwrap();
         fs::write(release.join("person-model").join("file"), "file").unwrap();
         let components = PreparedComponents {
+            models: ModelSelection::Original,
             release_root: release,
             extras_root: PathBuf::new(),
             upstream_tag: "test".to_string(),

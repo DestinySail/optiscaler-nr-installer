@@ -57,8 +57,38 @@ pub struct ExtrasFile {
     pub sha256: String,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ModelSelection {
+    #[default]
+    Original,
+    Small,
+    Both,
+}
+
+impl ModelSelection {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Original => "310.8.0 原模型（FP8 + INT4）",
+            Self::Small => "310.9.16 新模型（Small）",
+            Self::Both => "两个模型都安装",
+        }
+    }
+
+    pub fn includes(self, path: &str) -> bool {
+        match path {
+            "MFGUnlocker.asi" => true,
+            "dlssnr-amd/dlssnr.bin" | "dlssnr-amd/dlssnr-int4.bin" => self != Self::Small,
+            "dlssnr-amd/dlssnr-small.bin" => self != Self::Original,
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
+    #[serde(default)]
+    pub models: ModelSelection,
     #[serde(default)]
     pub release_repo: String,
     #[serde(default)]
@@ -70,6 +100,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            models: ModelSelection::default(),
             release_repo: option_env!("NR_RELEASE_REPO")
                 .unwrap_or(DEFAULT_RELEASE_REPO)
                 .to_string(),
@@ -159,6 +190,8 @@ pub struct ManagedFile {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InstallRecord {
+    #[serde(default)]
+    pub models: ModelSelection,
     pub schema: u32,
     pub game_name: String,
     pub exe: PathBuf,
@@ -197,6 +230,7 @@ mod tests {
         )
         .unwrap();
         assert!(record.complete);
+        assert_eq!(record.models, ModelSelection::Original);
     }
 }
 

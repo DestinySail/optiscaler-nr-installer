@@ -12,7 +12,7 @@ use crate::gpu;
 use crate::install;
 use crate::model::{
     APP_NAME, APP_VERSION, Action, AppPaths, FIXED_PROFILE, GameInfo, GpuInfo, MaintenanceReport,
-    Progress, Settings, UpstreamRelease,
+    ModelSelection, Progress, Settings, UpstreamRelease,
 };
 use crate::self_update::{self, AppUpdateInfo};
 use crate::updates;
@@ -471,8 +471,14 @@ impl App {
         self.screen = Screen::Installing;
         self.error = None;
         self.progress = Progress::new("预检查", "准备固定方案", Some(0.0));
-        let main_package_only =
-            self.install_status(&game).starts_with("已安装 ") && self.game_needs_update(&game);
+        let main_package_only = self.install_status(&game).starts_with("已安装 ")
+            && self.game_needs_update(&game)
+            && self
+                .paths
+                .as_ref()
+                .ok()
+                .and_then(|paths| install::load_record(paths, &game).ok())
+                .is_some_and(|record| record.models == self.settings.models);
         let _ = self.sender.send(Command::Install {
             game,
             settings: self.settings.clone(),
@@ -913,7 +919,7 @@ impl App {
                 let enabled =
                     self.selected_game().is_some() && self.can_install() && !self.app_update_busy;
                 let label = match self.selected_game() {
-                    Some(game) if self.game_needs_update(game) => "更新主包到此游戏  →",
+                    Some(game) if self.game_needs_update(game) => "更新到此游戏  →",
                     Some(game) if self.install_status(game).starts_with("已安装 ") => {
                         "重新安装固定方案  →"
                     }
@@ -936,7 +942,6 @@ impl App {
     fn install_page(&mut self, ui: &mut egui::Ui) {
         self.info_cards(ui);
         ui.add_space(8.0);
-
         let mut manual = false;
         let mut rescan = false;
         ui.horizontal(|ui| {
@@ -945,6 +950,24 @@ impl App {
                     .font(bold(19.0))
                     .color(TEXT),
             );
+            egui::ComboBox::from_id_salt("install_models")
+                .selected_text(match self.settings.models {
+                    ModelSelection::Original => "模型：310.8.0",
+                    ModelSelection::Small => "模型：310.9.16",
+                    ModelSelection::Both => "模型：两个都安装",
+                })
+                .width(140.0)
+                .show_ui(ui, |ui| {
+                    for models in [
+                        ModelSelection::Original,
+                        ModelSelection::Small,
+                        ModelSelection::Both,
+                    ] {
+                        ui.selectable_value(&mut self.settings.models, models, models.label());
+                    }
+                })
+                .response
+                .on_hover_text("选择要安装的模型；双模型首次安装默认启用新模型；已有选择会保留，可在游戏内切换");
             ui.add_space(4.0);
             if self.scanning_games {
                 ui.spinner();
@@ -2056,9 +2079,12 @@ fn spawn_worker(paths: Result<AppPaths, String>) -> (Sender<Command>, Receiver<E
                         }
                     };
                     let result = match action {
-                        Action::Repair | Action::Update => {
-                            run_install(paths, &settings, &game, upstream, false, &event_tx)
-                        }
+                        Action::Repair | Action::Update => install::load_record(paths, &game)
+                            .and_then(|record| {
+                                let mut settings = settings;
+                                settings.models = record.models;
+                                run_install(paths, &settings, &game, upstream, false, &event_tx)
+                            }),
                         Action::Check => install::check_install(paths, &game),
                         Action::Uninstall => install::uninstall(paths, &game),
                         Action::DisableFrameGen => install::disable_frame_gen(paths, &game),
@@ -3743,7 +3769,7 @@ mod tests {
                     })
                     .collect::<Vec<_>>()
             );
-            for label in ["更新主包到此游戏  →"] {
+            for label in ["更新到此游戏  →"] {
                 let output = ctx.run_ui(egui::RawInput::default(), |ui| app.render(ui));
                 let pos = output
                     .shapes
@@ -3785,7 +3811,7 @@ mod tests {
                 } => {
                     assert_eq!(game.exe, app.games[1].exe);
                     assert_eq!(upstream.tag, "v1.13.0");
-                    assert!(main_package_only);
+                    assert!(!main_package_only);
                 }
                 other => panic!("unexpected command: {other:?}"),
             }

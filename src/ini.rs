@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::Path;
 
+use crate::model::ModelSelection;
 use crate::util::write_atomic;
 
 const CORE: &[(&str, &str, &str)] = &[
@@ -18,6 +19,7 @@ pub fn apply_fixed_profile(
     path: &Path,
     disable_frame_gen: bool,
     preserve_preferences: bool,
+    models: Option<ModelSelection>,
 ) -> Result<Vec<String>, String> {
     let bytes = fs::read(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
     let has_bom = bytes.starts_with(&[0xef, 0xbb, 0xbf]);
@@ -51,6 +53,31 @@ pub fn apply_fixed_profile(
         !preserve_preferences,
         &mut changes,
     )?;
+    if let Some(models) = models {
+        let retained = find_section(&lines, "DlssNr").and_then(|(start, end)| {
+            lines[start + 1..end].iter().find_map(|line| {
+                let (key, value) = line.split_once('=')?;
+                (key.trim().eq_ignore_ascii_case("MochizukiNetworkModel")
+                    && matches!(value.trim(), "0" | "1"))
+                .then(|| value.trim().to_string())
+            })
+        });
+        let value = if models == ModelSelection::Both && preserve_preferences {
+            retained.as_deref().unwrap_or("1")
+        } else if models == ModelSelection::Original {
+            "0"
+        } else {
+            "1"
+        };
+        ensure_value(
+            &mut lines,
+            "DlssNr",
+            "MochizukiNetworkModel",
+            value,
+            true,
+            &mut changes,
+        )?;
+    }
     let mut encoded = Vec::new();
     if has_bom {
         encoded.extend_from_slice(&[0xef, 0xbb, 0xbf]);
@@ -60,7 +87,10 @@ pub fn apply_fixed_profile(
     Ok(changes)
 }
 
-pub fn check_fixed_profile(path: &Path) -> Result<Vec<String>, String> {
+pub fn check_fixed_profile(
+    path: &Path,
+    models: Option<ModelSelection>,
+) -> Result<Vec<String>, String> {
     let bytes = fs::read(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
     let text = std::str::from_utf8(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))
         .map_err(|e| format!("{} 不是 UTF-8: {e}", path.display()))?;
@@ -94,7 +124,11 @@ pub fn check_fixed_profile(path: &Path) -> Result<Vec<String>, String> {
             issues.push(format!("[{section}] {key}={}，期望 {expected}", values[0]));
         }
     }
-    for (section, key) in PREFERENCES {
+    let mut preferences = PREFERENCES.to_vec();
+    if models.is_some() {
+        preferences.push(("DlssNr", "MochizukiNetworkModel"));
+    }
+    for (section, key) in &preferences {
         let Some((start, end)) = find_section_str(&lines, section) else {
             issues.push(format!("缺少配置段 [{section}]"));
             continue;
@@ -116,7 +150,20 @@ pub fn check_fixed_profile(path: &Path) -> Result<Vec<String>, String> {
         if values.len() > 1 {
             issues.push(format!("[{section}] {key} 重复"));
         } else if values.is_empty() {
-            issues.push(format!("缺少 [{section}] {key}"));
+            if *key != "MochizukiNetworkModel" || models != Some(ModelSelection::Original) {
+                issues.push(format!("缺少 [{section}] {key}"));
+            }
+        } else if *key == "MochizukiNetworkModel"
+            && !matches!(
+                (models, values[0].as_str()),
+                (Some(ModelSelection::Original | ModelSelection::Both), "0")
+                    | (Some(ModelSelection::Small | ModelSelection::Both), "1")
+            )
+        {
+            issues.push(format!(
+                "[{section}] {key}={}，与已安装模型不匹配",
+                values[0]
+            ));
         } else if *section == "FrameGen"
             && !matches!(values[0].to_ascii_lowercase().as_str(), "true" | "false")
         {
@@ -294,7 +341,7 @@ mod tests {
              [XeFG]\nInterpolationCount=1\nHighResMV=true\n",
         )
         .unwrap();
-        assert!(check_fixed_profile(&path).unwrap().is_empty());
+        assert!(check_fixed_profile(&path, None).unwrap().is_empty());
         fs::remove_file(&path).unwrap();
         fs::remove_dir(&dir).unwrap();
     }
@@ -312,12 +359,52 @@ mod tests {
              [XeFG]\nInterpolationCount=3\nHighResMV=true\n",
         )
         .unwrap();
-        apply_fixed_profile(&path, false, true).unwrap();
+        apply_fixed_profile(&path, false, true, None).unwrap();
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("Enabled=false"));
         assert!(text.contains("InterpolationCount=3"));
         fs::remove_file(&path).unwrap();
         fs::remove_dir(&dir).unwrap();
+    }
+
+    #[test]
+    fn model_selection_preserves_only_available_choices() {
+        let dir = test_dir("models");
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("OptiScaler.ini");
+        for (models, existing, preserve, expected) in [
+            (ModelSelection::Original, "1", true, "0"),
+            (ModelSelection::Small, "0", true, "1"),
+            (ModelSelection::Both, "0", true, "0"),
+            (ModelSelection::Both, "1", true, "1"),
+            (ModelSelection::Both, "invalid", true, "1"),
+            (ModelSelection::Both, "0", false, "1"),
+        ] {
+            fs::write(
+                &path,
+                format!("[DlssNr]\nMochizukiNetworkModel={existing}\n"),
+            )
+            .unwrap();
+            apply_fixed_profile(&path, false, preserve, Some(models)).unwrap();
+            assert!(
+                fs::read_to_string(&path)
+                    .unwrap()
+                    .contains(&format!("MochizukiNetworkModel={expected}"))
+            );
+            assert!(check_fixed_profile(&path, Some(models)).unwrap().is_empty());
+        }
+        apply_fixed_profile(&path, true, true, None).unwrap();
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("MochizukiNetworkModel=1")
+        );
+        assert!(
+            !check_fixed_profile(&path, Some(ModelSelection::Original))
+                .unwrap()
+                .is_empty()
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 
     fn test_dir(name: &str) -> std::path::PathBuf {
