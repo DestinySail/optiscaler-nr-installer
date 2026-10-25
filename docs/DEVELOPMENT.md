@@ -111,6 +111,14 @@ Wrangler 不在 PATH 中时，可通过 `-WranglerCommand @('C:\path\to\node.exe
 
 ## 安装器发布
 
+推荐用工作流 `.github/workflows/release-app.yml`（`workflow_dispatch`，输入版本号）。它在 Windows Runner 上跑测试、签名清单并创建 `app-v*` Release，签名私钥取自仓库 Secret `NR_CATALOG_SIGNING_KEY`，本地无需密码：
+
+```powershell
+gh workflow run release-app.yml -f version=0.2.4
+```
+
+本地手工发布仍需使用带密码的私钥（可参考下面的命令）。两种方式都要先提交版本号和 `release/notes/app-v<版本>.md`：
+
 ```powershell
 .\scripts\package-app.ps1 `
   -Exe .\target\release\OptiScalerNR.exe `

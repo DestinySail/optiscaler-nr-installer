@@ -1,0 +1,66 @@
+name: release-app
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 版本号（不含 app-v 前缀，例如 0.2.4）
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: github.repository == 'DestinySail/optiscaler-nr-installer'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+        env:
+          NR_RELEASE_REPO: ${{ github.repository }}
+          NR_UPDATE_PUBKEY: ${{ vars.NR_UPDATE_PUBKEY }}
+      - name: Package and sign
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SIGNING_KEY: ${{ secrets.NR_CATALOG_SIGNING_KEY }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:SIGNING_KEY) { throw 'NR_CATALOG_SIGNING_KEY secret is missing' }
+          $version = $env:VERSION.TrimStart('v')
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid version' }
+          if (-not (Test-Path -LiteralPath "release/notes/app-v$version.md")) { throw 'Release notes are missing' }
+          $tool = Join-Path $env:RUNNER_TEMP 'minisign'
+          $zip = "$tool.zip"
+          Invoke-WebRequest 'https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip' -OutFile $zip
+          Expand-Archive -LiteralPath $zip -DestinationPath $tool
+          $minisign = (Get-ChildItem -LiteralPath $tool -Recurse -Filter minisign.exe | Select-Object -First 1).FullName
+          if (-not $minisign) { throw 'minisign.exe not found' }
+          $publicKey = (Get-Content -LiteralPath 'release/update-key.pub' | Where-Object { $_ -match '^RW' }).Trim()
+          $keyPath = Join-Path $env:RUNNER_TEMP 'release.key'
+          try {
+            [IO.File]::WriteAllText($keyPath, $env:SIGNING_KEY)
+            Remove-Item Env:SIGNING_KEY
+            ./scripts/package-app.ps1 -Exe ./target/release/OptiScalerNR.exe -Version $version -Repo $env:GITHUB_REPOSITORY -MinisignKey $keyPath -MinisignExe $minisign
+          } finally {
+            Remove-Item -LiteralPath $keyPath -Force -ErrorAction SilentlyContinue
+          }
+          & $minisign -V -P $publicKey -m dist/update-manifest.json -x dist/update-manifest.json.minisig
+          if ($LASTEXITCODE -ne 0) { throw 'Manifest signature verification failed' }
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:VERSION.TrimStart('v')
+          gh release create "app-v$version" --target $env:GITHUB_SHA --title "OptiScaler NR Installer $version" --notes-file "release/notes/app-v$version.md" dist/OptiScalerNR.exe dist/update-manifest.json dist/update-manifest.json.minisig "dist/app-v$version.sha256"
