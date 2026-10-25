@@ -2,23 +2,23 @@
   "schema": 1,
   "installer": {
     "schema": 1,
-    "version": "0.2.4",
+    "version": "0.2.5",
     "platform": "windows-x64",
-    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.2.4/OptiScalerNR.exe",
-    "sha256": "c9e6b4d38a9460e9022e52b2c2fccfd7ed684531655cd482f60e80c7ee215c7d",
-    "notes": "OptiScaler NR Installer 0.2.4"
+    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.2.5/OptiScalerNR.exe",
+    "sha256": "0ce99f0b53434aee1e12e6ec2dc4f367cb6e1b94d3f80e4b0f499bdaeabef6ef",
+    "notes": "OptiScaler NR Installer 0.2.5"
   },
   "upstream": {
-    "release_id": 423226883,
-    "tag": "v1.13.3.3",
-    "published_at": "2026-10-25T07:46:08Z",
+    "release_id": 422063325,
+    "tag": "v1.13.3",
+    "published_at": "2026-10-23T16:23:32Z",
     "asset": {
-      "id": 674420535,
-      "name": "OptScaler-NR-1.13.3.3.zip",
-      "size": 215671577,
-      "sha256": "496b4f259be306aa0134d936897333d018a7ff194ceda0fca77c4c3c37f866ed",
-      "url": "https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/v1.13.3.3/OptScaler-NR-1.13.3.3.zip",
-      "updated_at": "2026-10-25T07:46:20Z"
+      "id": 669691746,
+      "name": "OptScaler-NR-1.13.3.zip",
+      "size": 215587465,
+      "sha256": "3a8bb595756bf91ff0a72bfd6af0007b7c2856b0658daa2770cb2c367553dd18",
+      "url": "https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/v1.13.3/OptScaler-NR-1.13.3.zip",
+      "updated_at": "2026-10-23T16:23:44Z"
     },
     "checked_at_ms": 0
   },
