@@ -42,7 +42,8 @@ jobs:
           $zip = "$tool.zip"
           Invoke-WebRequest 'https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-win64.zip' -OutFile $zip
           Expand-Archive -LiteralPath $zip -DestinationPath $tool
-          $minisign = (Get-ChildItem -LiteralPath $tool -Recurse -Filter minisign.exe | Select-Object -First 1).FullName
+          $minisign = (Get-ChildItem -LiteralPath $tool -Recurse -Filter minisign.exe |
+            Where-Object { $_.FullName -match 'x86_64' } | Select-Object -First 1).FullName
           if (-not $minisign) { throw 'minisign.exe not found' }
           $publicKey = (Get-Content -LiteralPath 'release/update-key.pub' | Where-Object { $_ -match '^RW' }).Trim()
           $keyPath = Join-Path $env:RUNNER_TEMP 'release.key'
