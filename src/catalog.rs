@@ -21,11 +21,17 @@ const PUBLIC_KEY: &str = match option_env!("NR_UPDATE_PUBKEY") {
 pub struct Catalog {
     schema: u32,
     pub installer: UpdateManifest,
-    pub upstream: UpstreamRelease,
+    // ponytail: 主包与 REFramework 是外部发布，缺项或校验失败只降级对应组件，安装器更新不受影响。
+    #[serde(default)]
+    pub upstream: Option<UpstreamRelease>,
     #[serde(default)]
     pub reframework: Option<UpstreamRelease>,
     #[serde(skip)]
     pub warning: Option<String>,
+    #[serde(skip)]
+    pub upstream_error: Option<String>,
+    #[serde(skip)]
+    pub reframework_error: Option<String>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -88,7 +94,9 @@ fn verified_cache(cache: &Cache, settings: &Settings, public_key: &str) -> Resul
         settings,
         public_key,
     )?;
-    catalog.upstream.checked_at_ms = cache.checked_at_ms;
+    if let Some(upstream) = &mut catalog.upstream {
+        upstream.checked_at_ms = cache.checked_at_ms;
+    }
     catalog.warning = cache.error.clone();
     Ok(catalog)
 }
@@ -167,14 +175,81 @@ fn fetch_small(
     String::from_utf8(bytes).map_err(|_| "静态更新清单不是 UTF-8".into())
 }
 
-// ponytail: 上游用过 1.13.3.3 这类四段版本，semver 只认三段；这里按点分数字校验，出现非数字段即拒绝。
-fn is_stable_version(tag: &str) -> bool {
-    let core = tag.strip_prefix('v').unwrap_or(tag);
-    let parts: Vec<&str> = core.split('.').collect();
-    parts.len() >= 3
-        && parts
-            .iter()
-            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+// ponytail: 上游 tag 不保证是 semver（出现过 1.13.3.3、日期串甚至无点版本），只按预发布标识拒绝。
+// 版本大小完全由清单发布方决定；如需严格排序，改读 release 的 prerelease 字段。
+fn is_stable_tag(tag: &str) -> bool {
+    let tag = tag.trim().trim_start_matches(['v', 'V']);
+    !tag.is_empty()
+        && tag
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".-_+".contains(c))
+        && ![
+            "alpha", "beta", "pre", "rc", "nightly", "dev", "snapshot", "test", "canary", "draft",
+            "preview",
+        ]
+        .iter()
+        .any(|marker| tag.to_ascii_lowercase().contains(marker))
+}
+
+fn validate_upstream(upstream: &UpstreamRelease) -> Result<(), String> {
+    if !is_stable_tag(&upstream.tag) {
+        return Err(format!("主包版本 {} 带预发布标识，已跳过", upstream.tag));
+    }
+    let asset = &upstream.asset;
+    let name = safe_relative(std::path::Path::new(&asset.name))?;
+    if name.components().count() != 1
+        || asset.name.contains(['/', '\\', ':'])
+        || !asset.name.starts_with("OptScaler-NR-")
+        || !asset.name.ends_with(".zip")
+        || asset.id == 0
+        || upstream.release_id == 0
+        || asset.size == 0
+        || asset.sha256.len() != 64
+        || !asset.sha256.chars().all(|c| c.is_ascii_hexdigit())
+        || !asset.url.starts_with(&format!(
+            "https://github.com/{UPSTREAM_REPO}/releases/download/"
+        ))
+    {
+        return Err("静态清单的主包来源、文件名或哈希无效".into());
+    }
+    Ok(())
+}
+
+fn validate_reframework(reframework: &UpstreamRelease) -> Result<(), String> {
+    let asset = &reframework.asset;
+    let name = safe_relative(std::path::Path::new(&asset.name))?;
+    if name.components().count() != 1
+        || asset.name != "REFramework.zip"
+        || !reframework.tag.starts_with("nightly-")
+        || reframework.release_id == 0
+        || asset.id == 0
+        || asset.size == 0
+        || asset.sha256.len() != 64
+        || !asset.sha256.chars().all(|c| c.is_ascii_hexdigit())
+        || !asset.url.starts_with(&format!(
+            "https://github.com/{REFRAMEWORK_REPO}/releases/download/"
+        ))
+    {
+        return Err("静态清单的 REFramework 来源、文件名或哈希无效".into());
+    }
+    Ok(())
+}
+
+// 只对安装器清单做强制校验；上游组件的错误降级为组件级错误，不阻断安装器更新。
+fn validate_components(catalog: &mut Catalog) {
+    catalog.upstream_error = match &catalog.upstream {
+        Some(upstream) => validate_upstream(upstream).err(),
+        None => Some("更新清单未包含主包信息".into()),
+    };
+    if catalog.upstream_error.is_some() {
+        catalog.upstream = None;
+    }
+    if let Some(reframework) = &catalog.reframework
+        && let Err(error) = validate_reframework(reframework)
+    {
+        catalog.reframework_error = Some(error);
+        catalog.reframework = None;
+    }
 }
 
 fn verify(
@@ -189,49 +264,13 @@ fn verify(
         Signature::decode(signature).map_err(|error| format!("更新签名无效：{error}"))?;
     key.verify(bytes, &signature, false)
         .map_err(|error| format!("静态更新清单验签失败：{error}"))?;
-    let catalog: Catalog =
+    let mut catalog: Catalog =
         serde_json::from_slice(bytes).map_err(|error| format!("静态更新清单无效：{error}"))?;
     if catalog.schema != 1 {
         return Err("静态更新清单格式不受支持".into());
     }
     validate_manifest(settings.release_repo.trim(), &catalog.installer)?;
-    let upstream = &catalog.upstream;
-    let asset = &upstream.asset;
-    let name = safe_relative(std::path::Path::new(&asset.name))?;
-    if name.components().count() != 1
-        || asset.name.contains(['/', '\\', ':'])
-        || !asset.name.starts_with("OptScaler-NR-")
-        || !asset.name.ends_with(".zip")
-        || asset.id == 0
-        || upstream.release_id == 0
-        || asset.size == 0
-        || !is_stable_version(&upstream.tag)
-        || asset.sha256.len() != 64
-        || !asset.sha256.chars().all(|c| c.is_ascii_hexdigit())
-        || !asset.url.starts_with(&format!(
-            "https://github.com/{UPSTREAM_REPO}/releases/download/"
-        ))
-    {
-        return Err("静态清单的主包来源、文件名、版本或哈希无效".into());
-    }
-    if let Some(reframework) = &catalog.reframework {
-        let asset = &reframework.asset;
-        let name = safe_relative(std::path::Path::new(&asset.name))?;
-        if name.components().count() != 1
-            || asset.name != "REFramework.zip"
-            || !reframework.tag.starts_with("nightly-")
-            || reframework.release_id == 0
-            || asset.id == 0
-            || asset.size == 0
-            || asset.sha256.len() != 64
-            || !asset.sha256.chars().all(|c| c.is_ascii_hexdigit())
-            || !asset.url.starts_with(&format!(
-                "https://github.com/{REFRAMEWORK_REPO}/releases/download/"
-            ))
-        {
-            return Err("静态清单的 REFramework 来源、文件名或哈希无效".into());
-        }
-    }
+    validate_components(&mut catalog);
     Ok(catalog)
 }
 
@@ -298,25 +337,67 @@ mod tests {
     }
 
     #[test]
-    fn accepts_three_and_four_part_stable_versions() {
+    fn accepts_any_stable_tag_and_rejects_prerelease_markers() {
         for (tag, expected) in [
             ("v1.13.3", true),
             ("v1.13.3.3", true),
-            ("1.13.3.3", true),
-            ("v1.13", false),
+            ("1.13.3.4", true),
+            ("v1.13", true),
+            ("2026.10.25", true),
             ("v1.13.0-alpha8", false),
+            ("1.13.3-rc.1", false),
+            ("v1.13.3-beta", false),
+            ("preview-1.13.3", false),
             ("latest", false),
-            ("v1..3.1", false),
+            ("", false),
+            ("v1.13.3 (hotfix)", false),
         ] {
-            assert_eq!(is_stable_version(tag), expected, "{tag}");
+            assert_eq!(is_stable_tag(tag), expected, "{tag}");
         }
+    }
+
+    #[test]
+    fn unstable_upstream_only_disables_upstream_component() {
+        let mut catalog: Catalog = serde_json::from_str(PAYLOAD).unwrap();
+        validate_components(&mut catalog);
+        assert!(catalog.upstream.is_some());
+        assert!(catalog.upstream_error.is_none());
+        assert!(catalog.reframework.is_some());
+
+        let mut catalog: Catalog = serde_json::from_str(PAYLOAD).unwrap();
+        catalog.upstream.as_mut().unwrap().tag = "v1.13.3.4-rc1".into();
+        validate_components(&mut catalog);
+        assert!(catalog.upstream.is_none());
+        assert!(
+            catalog
+                .upstream_error
+                .as_deref()
+                .unwrap()
+                .contains("预发布")
+        );
+        assert_eq!(
+            crate::self_update::available(&catalog.installer)
+                .unwrap()
+                .unwrap()
+                .version,
+            "0.3.0"
+        );
+
+        let mut catalog: Catalog = serde_json::from_str(PAYLOAD).unwrap();
+        catalog.upstream = None;
+        catalog.reframework.as_mut().unwrap().asset.size = 0;
+        validate_components(&mut catalog);
+        assert!(catalog.upstream.is_none());
+        assert!(catalog.reframework.is_none());
+        assert!(catalog.reframework_error.is_some());
+        assert!(crate::self_update::available(&catalog.installer).is_ok());
     }
 
     #[test]
     fn verifies_catalog_and_rejects_tampering_wrong_key_and_wrong_source() {
         let settings = Settings::default();
         let catalog = verify(PAYLOAD.as_bytes(), SIGNATURE, &settings, TEST_KEY).unwrap();
-        assert_eq!(catalog.upstream.tag, "v1.13.0");
+        assert_eq!(catalog.upstream.as_ref().unwrap().tag, "v1.13.0");
         assert_eq!(
             catalog.reframework.as_ref().unwrap().asset.sha256,
             "27376e1da177ddcde9c46b3541bdc6fa1ad54a11d0cab9f7782eff0481455e94"
@@ -364,7 +445,10 @@ mod tests {
         // The test server is now closed: only a forced refresh may attempt another request.
         let offline = check_from(&paths, &settings, &url, TEST_KEY, true).unwrap();
         assert!(offline.warning.is_some());
-        assert_eq!(offline.upstream.checked_at_ms, first.upstream.checked_at_ms);
+        assert_eq!(
+            offline.upstream.as_ref().unwrap().checked_at_ms,
+            first.upstream.as_ref().unwrap().checked_at_ms
+        );
         let cache_path = paths.updates.join("catalog-cache.json");
         let cache = read_json::<Cache>(&cache_path).unwrap();
         assert_eq!(cache.payload.as_deref(), Some(PAYLOAD));
@@ -440,7 +524,7 @@ mod tests {
         let fallback = check_from(&paths, &settings, &url, TEST_KEY, true).unwrap();
         worker.join().unwrap();
         assert!(fallback.warning.as_deref().unwrap().contains("验签失败"));
-        assert_eq!(fallback.upstream.tag, "v1.13.0");
+        assert_eq!(fallback.upstream.as_ref().unwrap().tag, "v1.13.0");
         assert_eq!(
             read_json::<Cache>(&cache_path).unwrap().payload.as_deref(),
             Some(PAYLOAD)

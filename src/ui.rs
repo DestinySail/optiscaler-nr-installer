@@ -2027,18 +2027,24 @@ fn spawn_worker(paths: Result<AppPaths, String>) -> (Sender<Command>, Receiver<E
                             continue;
                         }
                     };
-                    let result = crate::catalog::check(paths, &settings, force);
-                    let upstream = result
-                        .as_ref()
-                        .map(|catalog| catalog.upstream.clone())
-                        .map_err(Clone::clone);
-                    let app_update = result
-                        .as_ref()
-                        .map_err(Clone::clone)
-                        .and_then(|catalog| self_update::available(&catalog.installer));
-                    let warning = result.ok().and_then(|catalog| catalog.warning);
+                    // 安装器与主包分别判定：主包清单错误只影响主包，安装器更新照常触发。
+                    let (upstream, app_update, warning) =
+                        match crate::catalog::check(paths, &settings, force) {
+                            Ok(catalog) => {
+                                let upstream =
+                                    catalog.upstream.clone().map(Box::new).ok_or_else(|| {
+                                        catalog
+                                            .upstream_error
+                                            .clone()
+                                            .unwrap_or_else(|| "更新清单未包含主包信息".into())
+                                    });
+                                let app_update = self_update::available(&catalog.installer);
+                                (upstream, app_update, catalog.warning)
+                            }
+                            Err(error) => (Err(error.clone()), Err(error), None),
+                        };
                     let _ = event_tx.send(Event::Checked {
-                        upstream: upstream.map(Box::new),
+                        upstream,
                         app_update,
                         warning,
                     });
@@ -3227,6 +3233,8 @@ fn is_managed_status(status: &str) -> bool {
     status.starts_with("已安装 ") || matches!(status, "外部安装" | "安装未完成")
 }
 
+// ponytail: 上游版本号格式不保证（1.13.3.3、日期串等），解析不了就按“不相等即需要更新”处理，
+// 由清单发布方保证不会把旧版本当新版本；能解析时仍按数字段严格比较。
 fn newer_version(latest: &str, installed: &str) -> bool {
     let latest = latest.trim().trim_start_matches(['v', 'V']);
     let installed = installed.trim().trim_start_matches(['v', 'V']);
@@ -3235,9 +3243,12 @@ fn newer_version(latest: &str, installed: &str) -> bool {
         semver::Version::parse(installed),
     ) {
         (Ok(latest), Ok(installed)) => latest > installed,
-        _ => match (numeric_version_parts(latest), numeric_version_parts(installed)) {
+        _ => match (
+            numeric_version_parts(latest),
+            numeric_version_parts(installed),
+        ) {
             (Some(latest), Some(installed)) => latest > installed,
-            _ => false,
+            _ => latest != installed,
         },
     }
 }
@@ -3482,7 +3493,9 @@ mod tests {
             ("v1.13.3.3", "1.13.3", true),
             ("v1.13.3", "1.13.3.3", false),
             ("1.13.3.10", "1.13.3.9", true),
-            ("latest", "unknown", false),
+            ("1.13.3.4-hotfix", "1.13.3.3", true),
+            ("latest", "unknown", true),
+            ("unknown", "unknown", false),
         ] {
             assert_eq!(newer_version(latest, installed), expected);
         }

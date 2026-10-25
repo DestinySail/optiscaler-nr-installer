@@ -7,11 +7,16 @@ use crate::model::{AppPaths, Progress, Settings, UpstreamRelease};
 use crate::util::{safe_relative, sha256_file};
 
 pub fn check_upstream(paths: &AppPaths, settings: &Settings) -> Result<UpstreamRelease, String> {
-    Ok(crate::catalog::check(paths, settings, false)?.upstream)
+    let catalog = crate::catalog::check(paths, settings, false)?;
+    catalog.upstream.ok_or_else(|| {
+        catalog
+            .upstream_error
+            .unwrap_or_else(|| "更新清单未包含主包信息".into())
+    })
 }
 
 pub fn load_cached_upstream(paths: &AppPaths, settings: &Settings) -> Option<UpstreamRelease> {
-    crate::catalog::cached(paths, settings).map(|catalog| catalog.upstream)
+    crate::catalog::cached(paths, settings).and_then(|catalog| catalog.upstream)
 }
 
 pub fn upstream_archive(paths: &AppPaths, release: &UpstreamRelease) -> PathBuf {

@@ -54,35 +54,36 @@ if ($exe.Count -ne 1 -or ($exe[0].digest -and $exe[0].digest -ne "sha256:$($inst
     throw 'Installer asset is missing or its digest disagrees with the signed manifest'
 }
 
-$upstream = if ($UpstreamTag) {
-    if ($UpstreamTag -notmatch '^v?\d+\.\d+\.\d+(\.\d+)*$') { throw 'Invalid upstream tag override' }
-    Read-GitHubJson "repos/TheAutomatic/dlss-5-amd-project/releases/tags/$UpstreamTag"
-} else {
-    Read-GitHubJson 'repos/TheAutomatic/dlss-5-amd-project/releases/latest'
+# Upstream tags are not semver (1.13.3.3, dates, etc.): only reject pre-release markers.
+function Test-StableTag([string]$Tag) {
+    if ([string]::IsNullOrWhiteSpace($Tag)) { return $false }
+    $plain = ($Tag.Trim() -replace '^[vV]+', '')
+    if (-not $plain) { return $false }
+    if ($plain -notmatch '^[0-9A-Za-z._+-]+$') { return $false }
+    $lower = $plain.ToLowerInvariant()
+    foreach ($marker in @('alpha', 'beta', 'pre', 'rc', 'nightly', 'dev', 'snapshot', 'test', 'canary', 'draft', 'preview')) {
+        if ($lower.Contains($marker)) { return $false }
+    }
+    return $true
 }
-if ($upstream.draft -or $upstream.prerelease -or $upstream.tag_name -notmatch '^v?\d+\.\d+\.\d+(\.\d+)*$') {
-    throw 'Upstream release is not stable'
-}
-$asset = $upstream.assets | Where-Object { $_.name -match '^OptScaler-NR-[^/\\:]+\.zip$' } |
-    Sort-Object id -Descending | Select-Object -First 1
-if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or $asset.size -le 0 -or
-    -not $asset.browser_download_url.StartsWith('https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/')) {
-    throw 'Upstream package has no valid source, size or SHA-256 digest'
-}
-$reframework = Read-GitHubJson 'repos/praydog/REFramework-nightly/releases/latest'
-if ($reframework.draft -or $reframework.prerelease -or $reframework.tag_name -notmatch '^nightly-') {
-    throw 'REFramework nightly release is not stable'
-}
-$refAsset = @($reframework.assets | Where-Object name -EQ 'REFramework.zip')
-if ($refAsset.Count -ne 1 -or $refAsset[0].digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or
-    $refAsset[0].size -le 0 -or
-    -not $refAsset[0].browser_download_url.StartsWith('https://github.com/praydog/REFramework-nightly/releases/download/')) {
-    throw 'REFramework package has no valid source, size or SHA-256 digest'
-}
-$catalog = [ordered]@{
-    schema = 1
-    installer = $installer
-    upstream = [ordered]@{
+
+function Get-UpstreamEntry {
+    $upstream = if ($UpstreamTag) {
+        if (-not (Test-StableTag $UpstreamTag)) { throw 'Invalid upstream tag override' }
+        Read-GitHubJson "repos/TheAutomatic/dlss-5-amd-project/releases/tags/$UpstreamTag"
+    } else {
+        Read-GitHubJson 'repos/TheAutomatic/dlss-5-amd-project/releases/latest'
+    }
+    if ($upstream.draft -or $upstream.prerelease -or -not (Test-StableTag $upstream.tag_name)) {
+        throw "Upstream release is not stable: $($upstream.tag_name)"
+    }
+    $asset = $upstream.assets | Where-Object { $_.name -match '^OptScaler-NR-[^/\\:]+\.zip$' } |
+        Sort-Object id -Descending | Select-Object -First 1
+    if (-not $asset -or $asset.digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or $asset.size -le 0 -or
+        -not $asset.browser_download_url.StartsWith('https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/')) {
+        throw 'Upstream package has no valid source, size or SHA-256 digest'
+    }
+    return [ordered]@{
         release_id = $upstream.id
         tag = $upstream.tag_name
         published_at = $upstream.published_at
@@ -96,7 +97,20 @@ $catalog = [ordered]@{
         }
         checked_at_ms = 0
     }
-    reframework = [ordered]@{
+}
+
+function Get-ReframeworkEntry {
+    $reframework = Read-GitHubJson 'repos/praydog/REFramework-nightly/releases/latest'
+    if ($reframework.draft -or $reframework.prerelease -or $reframework.tag_name -notmatch '^nightly-') {
+        throw 'REFramework nightly release is not stable'
+    }
+    $refAsset = @($reframework.assets | Where-Object name -EQ 'REFramework.zip')
+    if ($refAsset.Count -ne 1 -or $refAsset[0].digest -notmatch '^sha256:[a-fA-F0-9]{64}$' -or
+        $refAsset[0].size -le 0 -or
+        -not $refAsset[0].browser_download_url.StartsWith('https://github.com/praydog/REFramework-nightly/releases/download/')) {
+        throw 'REFramework package has no valid source, size or SHA-256 digest'
+    }
+    return [ordered]@{
         release_id = $reframework.id
         tag = $reframework.tag_name
         published_at = $reframework.published_at
@@ -111,7 +125,29 @@ $catalog = [ordered]@{
         checked_at_ms = 0
     }
 }
+
+# Upstream failures must never block installer updates: keep the previous component if available.
 $catalogPath = Join-Path $OutputDir 'update-catalog.json'
+$previous = if (Test-Path -LiteralPath $catalogPath) {
+    try { Get-Content -LiteralPath $catalogPath -Raw | ConvertFrom-Json } catch { $null }
+} else { $null }
+function Get-PreviousEntry([string]$Name) {
+    if ($previous -and @($previous.PSObject.Properties.Name) -contains $Name) { return $previous.$Name }
+    return $null
+}
+
+$upstreamEntry = try { Get-UpstreamEntry } catch {
+    Write-Warning "Upstream skipped: $($_.Exception.Message)"
+    Get-PreviousEntry 'upstream'
+}
+$reframeworkEntry = try { Get-ReframeworkEntry } catch {
+    Write-Warning "REFramework skipped: $($_.Exception.Message)"
+    Get-PreviousEntry 'reframework'
+}
+
+$catalog = [ordered]@{ schema = 1; installer = $installer }
+if ($upstreamEntry) { $catalog.upstream = $upstreamEntry }
+if ($reframeworkEntry) { $catalog.reframework = $reframeworkEntry }
 $text = ($catalog | ConvertTo-Json -Depth 8) + "`n"
 $unchanged = (Test-Path -LiteralPath $catalogPath) -and
     ([IO.File]::ReadAllText([IO.Path]::GetFullPath($catalogPath)) -eq $text) -and
@@ -128,4 +164,4 @@ if (-not $unchanged) {
 }
 & $MinisignExe -V -P $publicKey -m $catalogPath -x "$catalogPath.minisig"
 if ($LASTEXITCODE -ne 0) { throw 'Published catalog signature verification failed' }
-Write-Host "Catalog ready: installer $($installer.version), upstream $($upstream.tag_name), REFramework $($reframework.tag_name)"
+Write-Host "Catalog ready: installer $($installer.version), upstream $(if ($upstreamEntry) { $upstreamEntry.tag } else { 'skipped' }), REFramework $(if ($reframeworkEntry) { $reframeworkEntry.tag } else { 'skipped' })"
