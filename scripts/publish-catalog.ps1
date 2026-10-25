@@ -2,7 +2,8 @@ param(
     [string]$Repo = 'DestinySail/optiscaler-nr-installer',
     [Parameter(Mandatory = $true)][string]$MinisignKey,
     [string]$MinisignExe = 'minisign',
-    [string]$OutputDir = 'dist/update-feed'
+    [string]$OutputDir = 'dist/update-feed',
+    [string]$UpstreamTag = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,7 +54,12 @@ if ($exe.Count -ne 1 -or ($exe[0].digest -and $exe[0].digest -ne "sha256:$($inst
     throw 'Installer asset is missing or its digest disagrees with the signed manifest'
 }
 
-$upstream = Read-GitHubJson 'repos/TheAutomatic/dlss-5-amd-project/releases/latest'
+$upstream = if ($UpstreamTag) {
+    if ($UpstreamTag -notmatch '^v?\d+\.\d+\.\d+(\.\d+)*$') { throw 'Invalid upstream tag override' }
+    Read-GitHubJson "repos/TheAutomatic/dlss-5-amd-project/releases/tags/$UpstreamTag"
+} else {
+    Read-GitHubJson 'repos/TheAutomatic/dlss-5-amd-project/releases/latest'
+}
 if ($upstream.draft -or $upstream.prerelease -or $upstream.tag_name -notmatch '^v?\d+\.\d+\.\d+(\.\d+)*$') {
     throw 'Upstream release is not stable'
 }
