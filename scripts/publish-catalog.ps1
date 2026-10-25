@@ -54,7 +54,7 @@ if ($exe.Count -ne 1 -or ($exe[0].digest -and $exe[0].digest -ne "sha256:$($inst
 }
 
 $upstream = Read-GitHubJson 'repos/TheAutomatic/dlss-5-amd-project/releases/latest'
-if ($upstream.draft -or $upstream.prerelease -or $upstream.tag_name -notmatch '^v?\d+\.\d+\.\d+$') {
+if ($upstream.draft -or $upstream.prerelease -or $upstream.tag_name -notmatch '^v?\d+\.\d+\.\d+(\.\d+)*$') {
     throw 'Upstream release is not stable'
 }
 $asset = $upstream.assets | Where-Object { $_.name -match '^OptScaler-NR-[^/\\:]+\.zip$' } |

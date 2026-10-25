@@ -167,6 +167,16 @@ fn fetch_small(
     String::from_utf8(bytes).map_err(|_| "静态更新清单不是 UTF-8".into())
 }
 
+// ponytail: 上游用过 1.13.3.3 这类四段版本，semver 只认三段；这里按点分数字校验，出现非数字段即拒绝。
+fn is_stable_version(tag: &str) -> bool {
+    let core = tag.strip_prefix('v').unwrap_or(tag);
+    let parts: Vec<&str> = core.split('.').collect();
+    parts.len() >= 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+}
+
 fn verify(
     bytes: &[u8],
     signature: &str,
@@ -195,8 +205,7 @@ fn verify(
         || asset.id == 0
         || upstream.release_id == 0
         || asset.size == 0
-        || !semver::Version::parse(upstream.tag.strip_prefix('v').unwrap_or(&upstream.tag))
-            .is_ok_and(|version| version.pre.is_empty())
+        || !is_stable_version(&upstream.tag)
         || asset.sha256.len() != 64
         || !asset.sha256.chars().all(|c| c.is_ascii_hexdigit())
         || !asset.url.starts_with(&format!(
@@ -286,6 +295,21 @@ mod tests {
             }
         });
         (url, worker)
+    }
+
+    #[test]
+    fn accepts_three_and_four_part_stable_versions() {
+        for (tag, expected) in [
+            ("v1.13.3", true),
+            ("v1.13.3.3", true),
+            ("1.13.3.3", true),
+            ("v1.13", false),
+            ("v1.13.0-alpha8", false),
+            ("latest", false),
+            ("v1..3.1", false),
+        ] {
+            assert_eq!(is_stable_version(tag), expected, "{tag}");
+        }
     }
 
     #[test]

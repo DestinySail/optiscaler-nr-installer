@@ -3228,13 +3228,28 @@ fn is_managed_status(status: &str) -> bool {
 }
 
 fn newer_version(latest: &str, installed: &str) -> bool {
+    let latest = latest.trim().trim_start_matches(['v', 'V']);
+    let installed = installed.trim().trim_start_matches(['v', 'V']);
     match (
-        semver::Version::parse(latest.trim().trim_start_matches(['v', 'V'])),
-        semver::Version::parse(installed.trim().trim_start_matches(['v', 'V'])),
+        semver::Version::parse(latest),
+        semver::Version::parse(installed),
     ) {
         (Ok(latest), Ok(installed)) => latest > installed,
-        _ => false,
+        _ => match (numeric_version_parts(latest), numeric_version_parts(installed)) {
+            (Some(latest), Some(installed)) => latest > installed,
+            _ => false,
+        },
     }
+}
+
+// ponytail: 上游有 1.13.3.3 这类四段版本，semver 解析失败时按数字段比较；不做预发布排序，目录本身已拒绝预发布。
+fn numeric_version_parts(value: &str) -> Option<Vec<u64>> {
+    let core = value.split(['-', '+']).next()?;
+    let parts: Vec<u64> = core
+        .split('.')
+        .map(|part| part.parse().ok())
+        .collect::<Option<_>>()?;
+    (parts.len() >= 3).then_some(parts)
 }
 
 #[cfg(test)]
@@ -3464,6 +3479,9 @@ mod tests {
             ("v1.12.2", "1.12.2", false),
             ("1.9.0", "1.10.0", false),
             ("1.13.0", "1.13.0-rc.1", true),
+            ("v1.13.3.3", "1.13.3", true),
+            ("v1.13.3", "1.13.3.3", false),
+            ("1.13.3.10", "1.13.3.9", true),
             ("latest", "unknown", false),
         ] {
             assert_eq!(newer_version(latest, installed), expected);
