@@ -224,6 +224,9 @@ fn download_attempt(
     Ok(())
 }
 
+// ponytail: "system-proxy" 让 reqwest 读注册表的 ProxyEnable/ProxyServer，走用户代理。
+// 已知上限：ProxyServer 若为 "http=host:port;https=host:port" 分协议格式，reqwest 解析失败会静默直连；
+// 升级路径是自己解析该格式再 .proxy()，目前统计到的代理软件都写单一 host:port。
 pub fn http_client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
         .connect_timeout(Duration::from_secs(20))

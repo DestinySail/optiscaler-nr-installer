@@ -89,6 +89,8 @@ Wrangler 不在 PATH 中时，可通过 `-WranglerCommand @('C:\path\to\node.exe
 安装器下载完成后校验每个文件的大小与 SHA-256，并把 `dlssnr-int4.bin` 与主包的
 `model-tools/dlssnr-int4.sha256` 比较。主包更新导致模型不兼容时，安装器会停止并等待新的资源版本。
 
+全部 HTTP 请求走 `src/updates.rs::http_client()`。它启用了 `reqwest` 的 `system-proxy` 特性，读取注册表 `ProxyEnable`/`ProxyServer`，因此开启系统代理的用户下载走代理；`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` 环境变量优先级更高。`ProxyServer` 为 `http=host:port;https=host:port` 分协议格式时 `reqwest` 无法解析，会退回直连。
+
 上游主包及 REFramework 继续使用 ZIP；只有固定资源不再打包或解压。历史维护 ZIP 如需人工归档仍可执行 `scripts/package-extras.ps1 -SourceDir ...`，不参与客户端安装。对象路径与校验值直接读取 `release/extras-v1.json`，不额外维护云端配置快照或执行记录。
 
 ## 安装失败与存储清理
