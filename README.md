@@ -1,7 +1,7 @@
 # OptiScaler NR Installer
 
 [![Latest release](https://img.shields.io/github/v/release/DestinySail/optiscaler-nr-installer?label=release)](https://github.com/DestinySail/optiscaler-nr-installer/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: PolyForm Noncommercial 1.0.0](https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-orange.svg)](LICENSE)
 
 用于 Windows x64 的 Rust 安装器，安装一套固定组合：
 
@@ -107,4 +107,4 @@ cargo build --release --locked
 
 ## 许可证
 
-安装器源代码采用 [MIT License](LICENSE)。下载或部署的 OptiScaler、Mochizuki、XeFG 插件、模型和其他第三方文件不属于 MIT 授权范围，继续适用各自许可证。
+安装器源代码采用 [PolyForm Noncommercial License 1.0.0](LICENSE)，仅允许非商业用途。下载或部署的 OptiScaler、Mochizuki、XeFG 插件、模型和其他第三方文件不属于本授权范围，继续适用各自许可证。

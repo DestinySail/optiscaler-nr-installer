@@ -3,7 +3,7 @@ name = "optiscaler-nr-installer"
 version = "0.2.7"
 edition = "2024"
 description = "Windows installer for OptiScaler NR + Mochizuki backend + Intel XeFG"
-license = "MIT"
+license-file = "LICENSE"
 repository = "https://github.com/DestinySail/optiscaler-nr-installer"
 
 [[bin]]
