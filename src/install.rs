@@ -175,6 +175,7 @@ pub fn install(
             Some(0.88),
         ));
         ini::apply_fixed_profile(&ini_path, false, ini_existed, Some(components.models))?;
+        ini::apply_asi_profile(&game.game_dir, &components.release_root, components.models)?;
 
         progress(Progress::new("验证", "校验所有受管文件", Some(0.94)));
         let mut managed = Vec::new();
@@ -282,7 +283,10 @@ pub fn check_install(paths: &AppPaths, game: &GameInfo) -> Result<MaintenanceRep
             lines: vec!["请先卸载该游戏，再重新安装".to_string()],
         });
     }
-    let mut issues = Vec::new();
+    let mut issues = ini::check_asi_profile(&game.game_dir, record.models)?
+        .into_iter()
+        .map(|issue| format!("dlssnr-amd.ini：{issue}"))
+        .collect::<Vec<_>>();
     for file in &record.files {
         let target = record_target(&game.game_dir, &file.relative_path)?;
         if !target.is_file() {
@@ -533,11 +537,6 @@ fn build_plan(components: &PreparedComponents, proxy: &str) -> Result<Vec<Planne
         &components.release_root.join("OptiScaler"),
         "OptiScaler",
     )?;
-    add(
-        &mut files,
-        &components.release_root.join("MochizukiNrRuntime.dll"),
-        "MochizukiNrRuntime.dll",
-    )?;
     add_tree(
         &mut files,
         &components.release_root.join("dlssnr-amd"),
@@ -555,11 +554,7 @@ fn build_plan(components: &PreparedComponents, proxy: &str) -> Result<Vec<Planne
             &components.extras_root.join("MFGUnlocker.asi"),
             "OptiScaler/plugins/MFGUnlocker.asi",
         )?;
-        for relative in [
-            "dlssnr-amd/dlssnr.bin",
-            "dlssnr-amd/dlssnr-int4.bin",
-            "dlssnr-amd/dlssnr-small.bin",
-        ] {
+        for relative in ["dlssnr-amd/dlssnr.bin", "dlssnr-amd/dlssnr-small.bin"] {
             if components.models.includes(relative) {
                 add(&mut files, &components.extras_root.join(relative), relative)?;
             }
@@ -577,7 +572,6 @@ fn is_extras_file(relative: &str) -> bool {
         relative.to_ascii_lowercase().as_str(),
         "optiscaler/plugins/mfgunlocker.asi"
             | "dlssnr-amd/dlssnr.bin"
-            | "dlssnr-amd/dlssnr-int4.bin"
             | "dlssnr-amd/dlssnr-small.bin"
     )
 }
@@ -801,6 +795,23 @@ mod tests {
         path
     }
 
+    fn asi_model_value(game_dir: &Path) -> String {
+        let text = fs::read_to_string(game_dir.join("dlssnr-amd.ini")).unwrap();
+        text.split("[Network]")
+            .nth(1)
+            .unwrap_or_default()
+            .lines()
+            .skip(1)
+            .take_while(|line| !line.trim_start().starts_with('['))
+            .find_map(|line| {
+                let (key, value) = line.split_once('=')?;
+                key.trim()
+                    .eq_ignore_ascii_case("Model")
+                    .then(|| value.trim().to_string())
+            })
+            .unwrap()
+    }
+
     fn record(files: &[&str]) -> InstallRecord {
         InstallRecord {
             models: ModelSelection::Original,
@@ -936,14 +947,14 @@ mod tests {
             "[DlssNr]\nMochizukiNetworkModel=1\n",
         )
         .unwrap();
-        fs::write(release.join("MochizukiNrRuntime.dll"), "runtime").unwrap();
+        fs::write(
+            release.join("dlssnr-amd-optiscaler-renodx.ini"),
+            "[Network]\nModel = CC_SMALL_FP8\n",
+        )
+        .unwrap();
         fs::create_dir_all(extras.join("dlssnr-amd")).unwrap();
         fs::write(extras.join("MFGUnlocker.asi"), "plugin").unwrap();
-        let weights = [
-            "dlssnr-amd/dlssnr.bin",
-            "dlssnr-amd/dlssnr-int4.bin",
-            "dlssnr-amd/dlssnr-small.bin",
-        ];
+        let weights = ["dlssnr-amd/dlssnr.bin", "dlssnr-amd/dlssnr-small.bin"];
         for relative in weights {
             fs::write(extras.join(relative), relative).unwrap();
         }
@@ -972,6 +983,7 @@ mod tests {
             upstream_tag: "1.13.3".into(),
             extras_version: "extras-v2".into(),
         };
+        let mut previous_model: Option<String> = None;
         for models in [
             ModelSelection::Original,
             ModelSelection::Both,
@@ -1001,6 +1013,13 @@ mod tests {
                 "0"
             };
             assert!(config.contains(&format!("MochizukiNetworkModel={active}")));
+            let expected_model = match models {
+                ModelSelection::Original => "CC_SILVER_AARDWOLD",
+                ModelSelection::Small => "CC_SMALL_FP8",
+                ModelSelection::Both => previous_model.as_deref().unwrap(),
+            };
+            assert_eq!(asi_model_value(&game_dir), expected_model, "{models:?}");
+            previous_model = Some(expected_model.to_string());
             assert_eq!(check_install(&paths, &game).unwrap().title, "检查通过");
             let mut main_only = components.clone();
             main_only.extras_root = PathBuf::new();
@@ -1019,7 +1038,9 @@ mod tests {
             fs::read_to_string(game_dir.join("user.txt")).unwrap(),
             "keep"
         );
-        assert_eq!(fs::read_dir(&game_dir).unwrap().count(), 2);
+        assert!(game_dir.join("dlssnr-amd.ini").is_file());
+        assert!(game_dir.join("dlssnr-amd/dlssnr-amd.default.ini").is_file());
+        assert_eq!(fs::read_dir(&game_dir).unwrap().count(), 4);
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1032,7 +1053,6 @@ mod tests {
         fs::create_dir_all(release.join("person-model")).unwrap();
         fs::write(release.join("OptiScaler.dll"), "dll").unwrap();
         fs::write(release.join("OptiScaler.ini"), "ini").unwrap();
-        fs::write(release.join("MochizukiNrRuntime.dll"), "runtime").unwrap();
         fs::write(release.join("OptiScaler").join("file"), "file").unwrap();
         fs::write(release.join("dlssnr-amd").join("file"), "file").unwrap();
         fs::write(release.join("person-model").join("file"), "file").unwrap();

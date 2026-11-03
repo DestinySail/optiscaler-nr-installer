@@ -967,7 +967,7 @@ impl App {
                     }
                 })
                 .response
-                .on_hover_text("选择要安装的模型；双模型首次安装默认启用新模型；已有选择会保留，可在游戏内切换");
+                .on_hover_text("选择要安装的模型；双模型首次安装默认启用新模型；已有选择会保留，可在游戏内 NR Control（End）切换");
             ui.add_space(4.0);
             if self.scanning_games {
                 ui.spinner();
@@ -1284,7 +1284,7 @@ impl App {
                     ui.add_space(8.0);
                     for line in [
                         "01 · 启动游戏，在设置中开启 DLSS 帧生成。",
-                        "02 · 按 Insert 打开 OptiScaler，检查后端是否为 mochizuki、输出是否为 XeFG。",
+                        "02 · 按 Insert 打开 OptiScaler 确认后端为 mochizuki、输出为 XeFG；按 End 打开 NR Control 选择网络。",
                         "03 · 首次进入游戏场景后退出并重新启动游戏，让 HighResMV 检测生效。",
                     ] {
                         ui.add_space(6.0);

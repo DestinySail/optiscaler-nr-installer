@@ -74,7 +74,7 @@ pub fn prepare(
         &mut progress,
     )?;
     let release_root = find_release_root(&release_root)?;
-    validate_release(&release_root, settings.models)?;
+    validate_release(&release_root)?;
     let actual_version = read_small_text(&release_root.join("VERSION"), 1024)
         .ok()
         .map(|v| v.trim().to_string())
@@ -100,7 +100,6 @@ pub fn prepare(
                 (destination, manifest.version.clone())
             };
         validate_extras(&extras_root, &manifest, settings.models)?;
-        validate_model_compatibility(&release_root, &extras_root, settings.models)?;
         (extras_root, extras_version)
     } else {
         (PathBuf::new(), String::new())
@@ -169,11 +168,10 @@ fn validate_manifest(manifest: &ExtrasManifest) -> Result<(), String> {
     let required = [
         "MFGUnlocker.asi",
         "dlssnr-amd/dlssnr.bin",
-        "dlssnr-amd/dlssnr-int4.bin",
         "dlssnr-amd/dlssnr-small.bin",
     ];
     if paths != required.into_iter().collect() {
-        return Err("固定资源清单必须包含且只包含四个安装文件".to_string());
+        return Err("固定资源清单必须包含且只包含三个安装文件".to_string());
     }
     Ok(())
 }
@@ -243,12 +241,11 @@ fn materialize(
     Ok(destination)
 }
 
-fn validate_release(root: &Path, models: ModelSelection) -> Result<(), String> {
+fn validate_release(root: &Path) -> Result<(), String> {
     let required = [
         "OptiScaler.dll",
         "OptiScaler.ini",
         "OptiScaler",
-        "MochizukiNrRuntime.dll",
         "dlssnr-amd",
         "person-model",
     ];
@@ -257,11 +254,15 @@ fn validate_release(root: &Path, models: ModelSelection) -> Result<(), String> {
             return Err(format!("主组件缺少 {item}: {}", root.display()));
         }
     }
-    if models != ModelSelection::Original {
-        let descriptor = root.join("model-tools/descriptor-small.json");
-        if !descriptor.is_file() {
-            return Err("所选主包不支持 310.9.16 新模型，请更新至 v1.13.3 或更新版本".to_string());
-        }
+    let asi = root
+        .join("OptiScaler")
+        .join("plugins")
+        .join("dlssnr-amd.asi");
+    if !asi.is_file() {
+        return Err(format!(
+            "主组件缺少 OptiScaler/plugins/dlssnr-amd.asi，不是 v1.14.0 或更新版本的安装包: {}",
+            root.display()
+        ));
     }
     Ok(())
 }
@@ -285,31 +286,6 @@ fn validate_extras(
         {
             return Err(format!("固定资源大小或 SHA-256 不匹配: {}", file.path));
         }
-    }
-    Ok(())
-}
-
-fn validate_model_compatibility(
-    release_root: &Path,
-    extras_root: &Path,
-    models: ModelSelection,
-) -> Result<(), String> {
-    if models == ModelSelection::Small {
-        return Ok(());
-    }
-    let checksum_path = release_root.join("model-tools").join("dlssnr-int4.sha256");
-    let checksum = read_small_text(&checksum_path, 4096)?;
-    let expected = checksum
-        .split_whitespace()
-        .next()
-        .filter(|value| value.len() == 64 && value.chars().all(|c| c.is_ascii_hexdigit()))
-        .ok_or_else(|| format!("{} 不是有效的 SHA-256 清单", checksum_path.display()))?;
-    let int4 = extras_root.join("dlssnr-amd").join("dlssnr-int4.bin");
-    let actual = sha256_file(&int4)?;
-    if !actual.eq_ignore_ascii_case(expected) {
-        return Err(format!(
-            "固定资源中的 dlssnr-int4.bin 与新主包不兼容：实际 {actual}，主包期望 {expected}。请等待维护者发布新版 extra。"
-        ));
     }
     Ok(())
 }
@@ -350,7 +326,7 @@ mod tests {
         );
         assert_eq!(
             sha256_file(&upstream).unwrap(),
-            "779b9b5f4d5756f663798e796c2974d09f05077bde9df1ff5ace31e087ce4dfe"
+            "9b486fa45d82bd6db905de23eb04bf0c0eef7e6cd491809371c070bed80bd44c"
         );
         let root = std::env::temp_dir().join(format!(
             "optinr-cdn-live-{}-{}",
@@ -435,48 +411,38 @@ mod tests {
             assert_eq!(sha256_file(&game_dir.join(deployed)).unwrap(), file.sha256);
         }
         crate::install::uninstall(&paths, &game).unwrap();
-        assert_eq!(fs::read_dir(&game_dir).unwrap().count(), 1);
+        assert_eq!(fs::read_dir(&game_dir).unwrap().count(), 3);
         assert_eq!(fs::read(&exe).unwrap(), pe);
         crate::util::remove_tree_safely(&root).unwrap();
         println!("PASS: real CDN resume, installation, managed-file check, and uninstall");
     }
 
     #[test]
-    fn selected_models_require_compatible_runtime_and_int4() {
+    fn release_requires_v114_asi_layout() {
         let root = std::env::temp_dir().join(format!(
-            "optinr-compat-{}-{}",
+            "optinr-layout-{}-{}",
             std::process::id(),
             crate::util::now_ms()
         ));
-        fs::create_dir_all(root.join("model-tools")).unwrap();
-        for dir in ["OptiScaler", "dlssnr-amd", "person-model"] {
+        for dir in ["OptiScaler/plugins", "dlssnr-amd", "person-model"] {
             fs::create_dir_all(root.join(dir)).unwrap();
         }
-        for file in ["OptiScaler.dll", "OptiScaler.ini", "MochizukiNrRuntime.dll"] {
+        for file in ["OptiScaler.dll", "OptiScaler.ini"] {
             fs::write(root.join(file), "runtime").unwrap();
         }
-        assert!(validate_release(&root, ModelSelection::Small).is_err());
-        fs::write(root.join("model-tools/descriptor-small.json"), "{}").unwrap();
-        validate_model_compatibility(&root, &root, ModelSelection::Small).unwrap();
-        assert!(validate_model_compatibility(&root, &root, ModelSelection::Both).is_err());
-        validate_release(&root, ModelSelection::Both).unwrap();
-        let int4 = root.join("dlssnr-amd/dlssnr-int4.bin");
-        fs::write(&int4, "weights").unwrap();
-        fs::write(
-            root.join("model-tools/dlssnr-int4.sha256"),
-            sha256_file(&int4).unwrap(),
-        )
-        .unwrap();
-        validate_model_compatibility(&root, &root, ModelSelection::Both).unwrap();
-        fs::write(&int4, "corrupt").unwrap();
-        assert!(validate_model_compatibility(&root, &root, ModelSelection::Both).is_err());
+        let error = validate_release(&root).unwrap_err();
+        assert!(error.contains("v1.14.0"), "{error}");
+        fs::write(root.join("OptiScaler/plugins/dlssnr-amd.asi"), "asi").unwrap();
+        validate_release(&root).unwrap();
+        fs::remove_file(root.join("OptiScaler/plugins/dlssnr-amd.asi")).unwrap();
+        assert!(validate_release(&root).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
     fn embedded_manifest_and_legacy_settings() {
         let manifest = fixed_extras().unwrap();
-        assert_eq!(manifest.files.len(), 4);
+        assert_eq!(manifest.files.len(), 3);
         assert!(
             manifest
                 .base_url
@@ -520,7 +486,7 @@ mod tests {
             (ModelSelection::Original, false),
             (ModelSelection::Small, false),
             (ModelSelection::Both, false),
-            (ModelSelection::Original, true),
+            (ModelSelection::Both, true),
         ] {
             let root = std::env::temp_dir().join(format!(
                 "optinr-direct-{}-{}-{models:?}-{corrupt}",

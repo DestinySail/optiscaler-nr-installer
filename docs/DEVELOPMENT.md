@@ -61,7 +61,6 @@ cargo build --release --locked
 
 - `MFGUnlocker.asi`
 - `dlssnr-amd/dlssnr.bin`
-- `dlssnr-amd/dlssnr-int4.bin`
 - `dlssnr-amd/dlssnr-small.bin`
 
 维护存档：
@@ -86,8 +85,7 @@ Wrangler 不在 PATH 中时，可通过 `-WranglerCommand @('C:\path\to\node.exe
 
 上传器在发布前校验全部源文件；远端已有对象必须哈希一致才跳过，差异对象拒绝覆盖，只有“键不存在”才上传。发布后通过公开域名完整下载并验证大小、SHA-256 和 Range 响应。每个版本只运行一个发布者；同版本路径不能覆盖，内容变化必须使用新版本路径。
 
-安装器下载完成后校验每个文件的大小与 SHA-256，并把 `dlssnr-int4.bin` 与主包的
-`model-tools/dlssnr-int4.sha256` 比较。主包更新导致模型不兼容时，安装器会停止并等待新的资源版本。
+安装器下载完成后校验每个文件的大小与 SHA-256。主包 v1.14.0 起不再提供 `dlssnr-int4.sha256`，INT4 mixed 权重随包内 `dlssnr-amd/int4/` 部署，安装器不再做跨包哈希比较。
 
 全部 HTTP 请求走 `src/updates.rs::http_client()`。它启用了 `reqwest` 的 `system-proxy` 特性，读取注册表 `ProxyEnable`/`ProxyServer`，因此开启系统代理的用户下载走代理；`HTTP_PROXY`/`HTTPS_PROXY`/`ALL_PROXY`/`NO_PROXY` 环境变量优先级更高。`ProxyServer` 为 `http=host:port;https=host:port` 分协议格式时 `reqwest` 无法解析，会退回直连。
 
@@ -168,7 +166,7 @@ dist/app-v0.2.3.sha256
   -MinisignExe "C:\path\to\minisign.exe"
 ```
 
-工作流 [`update-catalog.yml`](../.github/workflows/update-catalog.yml) 每 6 小时、发布 Release 后或手动触发时运行。配置仓库 Secret `NR_CATALOG_SIGNING_KEY` 为本项目专用 minisign 私钥全文（非密码保护的 CI 专用密钥；必须与 `release/update-key.pub` 匹配）。工作流只在原仓库运行、不由 PR 触发，签名完成后删除临时密钥，两个清单文件以一个提交发布；生成或验签失败不会推送。元数据未变化时不产生提交。
+工作流 [`update-catalog.yml`](../.github/workflows/update-catalog.yml) 每 2 小时、发布 Release 后或手动触发时运行。配置仓库 Secret `NR_CATALOG_SIGNING_KEY` 为本项目专用 minisign 私钥全文（非密码保护的 CI 专用密钥；必须与 `release/update-key.pub` 匹配）。工作流只在原仓库运行、不由 PR 触发，签名完成后删除临时密钥，两个清单文件以一个提交发布；生成或验签失败不会推送。元数据未变化时不产生提交。
 
 仓库变量 `NR_CATALOG_UPSTREAM_TAG` 用于把目录里的上游主包固定到指定 tag（如 `v1.13.3`），给读不懂四段版本号的老客户端留过渡窗口：此时目录仍发布新版安装器，老客户端能弹窗升级。过渡结束删除该变量，目录恢复跟随上游 `releases/latest`。固定 tag 也必须是稳定发布，安装器仍会校验其大小与 SHA-256。
 
@@ -178,9 +176,9 @@ Secret 不对访客公开，但拥有工作流修改权限的人或被攻破的�
 
 ## 模型选择
 
-安装页支持 310.8.0 原模型、310.9.16 Small 和双模型。`ModelSelection` 贯穿资源准备、文件计划、INI 合并与安装记录；旧记录缺少 `models` 时按原模型处理。固定清单 `release/extras-v1.json` 当前资源集为 `extras-v2`，保留原三个资源的不可变 `extras-v1` 对象路径，只新增 `extras-v2/dlssnr-amd/dlssnr-small.bin`。
+安装页支持 310.8.0 原模型、310.9.16 Small 和双模型。`ModelSelection` 贯穿资源准备、文件计划、INI 合并与安装记录；旧记录缺少 `models` 时按原模型处理。主包 v1.14.0 起由官方 `dlssnr-amd.asi` 接管神经降噪，模型选择还会写入游戏根目录 `dlssnr-amd.ini` 的 `[Network] Model`：单模型安装强制同步，双模型保留现有值。该文件由 ASI 在游戏内改写，因此不进入受管文件记录，卸载时保留。固定清单 `release/extras-v1.json` 当前资源集为 `extras-v2`，包含 `MFGUnlocker.asi`、`dlssnr-amd/dlssnr.bin` 与 `extras-v2/dlssnr-amd/dlssnr-small.bin`。
 
-Small 来源为官方 NVIDIA DLL 310.9.16，使用上游 v1.13.3 包内 `mochizuki-model.py --models small` 提取；清单固定其大小与完整 SHA-256。主包必须含 `model-tools/descriptor-small.json` 才允许选择 Small；安装原模型仍校验主包的 INT4 哈希。导入资源目录只要求所选模型及 MFGUnlocker，不要求未选模型。
+Small 来源为官方 NVIDIA DLL 310.9.16，使用上游 `model-tools/dlssnr_extract_model.exe` 提取；清单固定其大小与完整 SHA-256。主包必须含 `OptiScaler/plugins/dlssnr-amd.asi`，否则视为旧包拒绝部署。导入资源目录只要求所选模型及 MFGUnlocker，不要求未选模型。
 
 命令行也可指定模型，修复不指定时沿用安装记录：
 

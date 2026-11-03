@@ -33,7 +33,14 @@ pub fn check(paths: &AppPaths, settings: &Settings) -> Result<Option<AppUpdateIn
 }
 
 pub fn available(manifest: &UpdateManifest) -> Result<Option<AppUpdateInfo>, String> {
-    let current = Version::parse(APP_VERSION).map_err(|e| format!("当前程序版本无效: {e}"))?;
+    available_for(APP_VERSION, manifest)
+}
+
+pub(crate) fn available_for(
+    current: &str,
+    manifest: &UpdateManifest,
+) -> Result<Option<AppUpdateInfo>, String> {
+    let current = Version::parse(current).map_err(|e| format!("当前程序版本无效: {e}"))?;
     let version = Version::parse(&manifest.version).map_err(|e| format!("更新版本无效: {e}"))?;
     if version <= current {
         return Ok(None);
@@ -66,7 +73,7 @@ fn verify_manifest(
         return Err("更新清单版本与 Release tag 不一致".to_string());
     }
     validate_manifest(repo, &manifest)?;
-    available(&manifest)
+    available_for("0.2.0", &manifest)
 }
 
 pub fn validate_manifest(repo: &str, manifest: &UpdateManifest) -> Result<(), String> {
@@ -125,6 +132,12 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(parsed.version, "0.3.0");
+        assert!(
+            available(&serde_json::from_slice(manifest).unwrap())
+                .unwrap()
+                .is_none(),
+            "the current build must not offer its own version"
+        );
         assert!(
             verify_manifest(
                 "DestinySail/optiscaler-nr-installer",

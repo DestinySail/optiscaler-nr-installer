@@ -69,7 +69,7 @@ pub enum ModelSelection {
 impl ModelSelection {
     pub fn label(self) -> &'static str {
         match self {
-            Self::Original => "310.8.0 原模型（FP8 + INT4）",
+            Self::Original => "310.8.0 原模型",
             Self::Small => "310.9.16 新模型（Small）",
             Self::Both => "两个模型都安装",
         }
@@ -78,9 +78,17 @@ impl ModelSelection {
     pub fn includes(self, path: &str) -> bool {
         match path {
             "MFGUnlocker.asi" => true,
-            "dlssnr-amd/dlssnr.bin" | "dlssnr-amd/dlssnr-int4.bin" => self != Self::Small,
+            "dlssnr-amd/dlssnr.bin" => self != Self::Small,
             "dlssnr-amd/dlssnr-small.bin" => self != Self::Original,
             _ => false,
+        }
+    }
+
+    pub fn asi_model(self) -> Option<&'static str> {
+        match self {
+            Self::Original => Some("CC_SILVER_AARDWOLD"),
+            Self::Small => Some("CC_SMALL_FP8"),
+            Self::Both => None,
         }
     }
 }

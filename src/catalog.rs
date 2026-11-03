@@ -376,7 +376,7 @@ mod tests {
                 .contains("预发布")
         );
         assert_eq!(
-            crate::self_update::available(&catalog.installer)
+            crate::self_update::available_for("0.2.0", &catalog.installer)
                 .unwrap()
                 .unwrap()
                 .version,
@@ -403,7 +403,7 @@ mod tests {
             "27376e1da177ddcde9c46b3541bdc6fa1ad54a11d0cab9f7782eff0481455e94"
         );
         assert_eq!(
-            crate::self_update::available(&catalog.installer)
+            crate::self_update::available_for("0.2.0", &catalog.installer)
                 .unwrap()
                 .unwrap()
                 .version,

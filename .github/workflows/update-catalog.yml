@@ -2,7 +2,7 @@ name: update-catalog
 
 on:
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '17 */2 * * *'
   release:
     types: [published]
   workflow_dispatch:

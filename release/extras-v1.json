@@ -15,12 +15,6 @@
       "sha256": "2b41c888cf4155b8958c665ba64018ab0bd25c85fc71a2b6db86d0d04d1f7fbd"
     },
     {
-      "path": "dlssnr-amd/dlssnr-int4.bin",
-      "key": "extras-v1/dlssnr-amd/dlssnr-int4.bin",
-      "size": 53211392,
-      "sha256": "22a0e2d3db1c2101a67e0d9aad066e0916afbc32cba47820f5ad24d46602319c"
-    },
-    {
       "path": "dlssnr-amd/dlssnr-small.bin",
       "key": "extras-v2/dlssnr-amd/dlssnr-small.bin",
       "size": 113917248,

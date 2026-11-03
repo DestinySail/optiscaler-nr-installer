@@ -11,7 +11,7 @@
 | OptiScaler DLSS NR 分支 | [Dagherbou/OptiScaler_DLSSNR](https://github.com/Dagherbou/OptiScaler_DLSSNR) | 许可见上游 |
 | Pre-SR Multipass 分支 | [wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass](https://github.com/wilsjo2/OptiScaler-DLSSNR-PreSR-Multipass) | 许可见上游 |
 | 前序整合 | [MatheusGViana/dlss-5-amd-project](https://github.com/MatheusGViana/dlss-5-amd-project) | 许可见上游 |
-| Mochizuki NR core | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) | MIT core；组合运行时为 GPL-3.0 |
+| Mochizuki NR core | [mochizuki0323/DLSSNR-AMD](https://github.com/mochizuki0323/DLSSNR-AMD) | MIT core；v1.14.0 起由官方 `dlssnr-amd.asi` 接管，包内组合运行时为 GPL-3.0 |
 | Mochizuki 产品适配 | [MatheusFerreiraS/neural-amd-opti](https://github.com/MatheusFerreiraS/neural-amd-opti) | GPL-3.0 |
 | XeFG 多帧插件 | [dashdogy/MFG-Unlocker](https://github.com/dashdogy/MFG-Unlocker) | MIT |
 | Daniel 权重来源 | [danielblnc/DLSS-NR-on-AMD](https://github.com/danielblnc/DLSS-NR-on-AMD) | 许可见上游；仅维护存档 |
@@ -24,10 +24,10 @@
 Mochizuki 模型的生成关系：
 
 - 原模型 `dlssnr.bin`：从 310.8.0 或 310.9.16 的 `WEIGHTS_HT` 资源提取；两个来源生成的原模型相同。
-- INT4 `dlssnr-int4.bin`：由原模型及上游 INT4 工具生成，仅用于原模型。
-- Small `dlssnr-small.bin`：从 310.9.16 的 `WEIGHTS_CC_SMALL_FP8` 资源提取，不支持 INT4。
+- Small `dlssnr-small.bin`：从 310.9.16 的 `WEIGHTS_CC_SMALL_FP8` 资源提取。
+- INT4 mixed：由主包内 `dlssnr-amd\int4\` 权重提供；安装器不再生成或部署旧的 `dlssnr-int4.bin`。
 
-提取与验证方法见[上游 Mochizuki 安装说明](https://github.com/TheAutomatic/dlss-5-amd-project/blob/v1.13.3/docs/mochizuki.md)。安装器使用的文件路径、大小、SHA-256 和维护源材料列于 [release/extras-v1.json](../release/extras-v1.json)，不在文档中重复维护哈希表。
+提取与验证方法见[上游 Mochizuki 安装说明](https://github.com/TheAutomatic/dlss-5-amd-project/blob/v1.14.0/docs/mochizuki.md)。安装器使用的文件路径、大小、SHA-256 和维护源材料列于 [release/extras-v1.json](../release/extras-v1.json)，不在文档中重复维护哈希表。
 
 ## 安装器直接依赖
 

@@ -179,6 +179,95 @@ pub fn check_fixed_profile(
     Ok(issues)
 }
 
+pub fn apply_asi_profile(
+    game_dir: &Path,
+    release_root: &Path,
+    models: ModelSelection,
+) -> Result<(), String> {
+    let path = game_dir.join("dlssnr-amd.ini");
+    if !path.is_file() {
+        let template = [
+            "dlssnr-amd-optiscaler-renodx.ini",
+            "dlssnr-amd-optiscaler.ini",
+        ]
+        .iter()
+        .map(|name| release_root.join(name))
+        .find(|candidate| candidate.is_file())
+        .ok_or_else(|| "主组件缺少 dlssnr-amd.ini 模板".to_string())?;
+        fs::copy(&template, &path).map_err(|e| format!("复制 {} 失败: {e}", template.display()))?;
+    }
+    if let Some(model) = models.asi_model() {
+        let mut lines = read_ini_lines(&path)?;
+        ensure_value(&mut lines, "Network", "Model", model, true, &mut Vec::new())?;
+        write_atomic(&path, (lines.join("\r\n") + "\r\n").as_bytes())?;
+    }
+    let mirror = game_dir.join("dlssnr-amd").join("dlssnr-amd.default.ini");
+    if let Some(parent) = mirror.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建 {} 失败: {e}", parent.display()))?;
+    }
+    fs::copy(&path, &mirror).map_err(|e| format!("复制 {} 失败: {e}", mirror.display()))?;
+    Ok(())
+}
+
+fn read_ini_lines(path: &Path) -> Result<Vec<String>, String> {
+    let bytes = fs::read(path).map_err(|e| format!("读取 {} 失败: {e}", path.display()))?;
+    let text = std::str::from_utf8(bytes.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(&bytes))
+        .map_err(|e| format!("{} 不是 UTF-8: {e}", path.display()))?;
+    let mut lines = text
+        .replace("\r\n", "\n")
+        .split('\n')
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
+    if lines.last().is_some_and(String::is_empty) {
+        lines.pop();
+    }
+    Ok(lines)
+}
+
+pub fn check_asi_profile(game_dir: &Path, models: ModelSelection) -> Result<Vec<String>, String> {
+    let path = game_dir.join("dlssnr-amd.ini");
+    if !path.is_file() {
+        return Ok(vec!["缺少 dlssnr-amd.ini".to_string()]);
+    }
+    let lines = read_ini_lines(&path)?;
+    let lines = lines.iter().map(String::as_str).collect::<Vec<_>>();
+    let Some((start, end)) = find_section_str(&lines, "Network") else {
+        return Ok(vec!["缺少配置段 [Network]".to_string()]);
+    };
+    let value = lines[start + 1..end].iter().find_map(|line| {
+        let line = line.trim();
+        if line.starts_with(';') || line.starts_with('#') {
+            return None;
+        }
+        let (key, value) = line.split_once('=')?;
+        key.trim()
+            .eq_ignore_ascii_case("Model")
+            .then(|| value.trim().to_string())
+    });
+    let Some(value) = value else {
+        return Ok(vec!["缺少 [Network] Model".to_string()]);
+    };
+    // ASI 允许游戏内换网络，所以只要基础模型已装就算有效；Experimental 需要安装时
+    // 由 delta 生成的权重，本安装器不生成。
+    let allowed: &[&str] = match models {
+        ModelSelection::Original => &["CC_SILVER_AARDWOLD", "CC_SILVER_AARDWOLD_INT4_MIXED"],
+        ModelSelection::Small => &["CC_SMALL_FP8"],
+        ModelSelection::Both => &[
+            "CC_SMALL_FP8",
+            "CC_SILVER_AARDWOLD",
+            "CC_SILVER_AARDWOLD_INT4_MIXED",
+        ],
+    };
+    let matched = allowed
+        .iter()
+        .any(|candidate| value.eq_ignore_ascii_case(candidate));
+    Ok(if matched {
+        Vec::new()
+    } else {
+        vec![format!("[Network] Model={value}，与已安装模型不匹配")]
+    })
+}
+
 fn ensure_value(
     lines: &mut Vec<String>,
     section: &str,
@@ -401,6 +490,118 @@ mod tests {
         );
         assert!(
             !check_fixed_profile(&path, Some(ModelSelection::Original))
+                .unwrap()
+                .is_empty()
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn asi_profile_copies_renodx_template_and_sets_model() {
+        let dir = test_dir("asi-fresh");
+        let release = dir.join("release");
+        fs::create_dir_all(&release).unwrap();
+        fs::write(
+            release.join("dlssnr-amd-optiscaler.ini"),
+            "[Network]\nModel = CC_SMALL_FP8\nRenodx=false\n",
+        )
+        .unwrap();
+        fs::write(
+            release.join("dlssnr-amd-optiscaler-renodx.ini"),
+            "[Network]\nModel = CC_SMALL_FP8\nRenodx=true\n",
+        )
+        .unwrap();
+        apply_asi_profile(&dir, &release, ModelSelection::Original).unwrap();
+        let text = fs::read_to_string(dir.join("dlssnr-amd.ini")).unwrap();
+        assert!(text.contains("Renodx=true"));
+        assert!(text.contains("Model=CC_SILVER_AARDWOLD"));
+        assert!(!text.starts_with('\u{feff}'));
+        assert_eq!(
+            fs::read(dir.join("dlssnr-amd/dlssnr-amd.default.ini")).unwrap(),
+            text.as_bytes()
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn asi_profile_requires_template() {
+        let dir = test_dir("asi-template");
+        let release = dir.join("release");
+        fs::create_dir_all(&release).unwrap();
+        assert_eq!(
+            apply_asi_profile(&dir, &release, ModelSelection::Original).unwrap_err(),
+            "主组件缺少 dlssnr-amd.ini 模板"
+        );
+        assert!(!dir.join("dlssnr-amd.ini").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn asi_profile_keeps_user_content_and_switches_model() {
+        let dir = test_dir("asi-switch");
+        let release = dir.join("release");
+        fs::create_dir_all(&release).unwrap();
+        let path = dir.join("dlssnr-amd.ini");
+        fs::write(
+            &path,
+            "; 用户注释\n[Network]\nModel=CC_SMALL_FP8\nTimeout=30\n\n[Quality]\nLevel=3\n",
+        )
+        .unwrap();
+        apply_asi_profile(&dir, &release, ModelSelection::Small).unwrap();
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("Model=CC_SMALL_FP8")
+        );
+        apply_asi_profile(&dir, &release, ModelSelection::Original).unwrap();
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("Model=CC_SILVER_AARDWOLD"));
+        for kept in ["; 用户注释", "Timeout=30", "Level=3"] {
+            assert!(text.contains(kept), "missing {kept}");
+        }
+        apply_asi_profile(&dir, &release, ModelSelection::Both).unwrap();
+        assert!(
+            fs::read_to_string(&path)
+                .unwrap()
+                .contains("Model=CC_SILVER_AARDWOLD")
+        );
+        assert_eq!(
+            fs::read(dir.join("dlssnr-amd/dlssnr-amd.default.ini")).unwrap(),
+            fs::read(&path).unwrap()
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn check_asi_profile_reports_missing_file_and_mismatched_model() {
+        let dir = test_dir("asi-check");
+        fs::create_dir_all(&dir).unwrap();
+        assert_eq!(
+            check_asi_profile(&dir, ModelSelection::Original).unwrap(),
+            vec!["缺少 dlssnr-amd.ini".to_string()]
+        );
+        let path = dir.join("dlssnr-amd.ini");
+        fs::write(&path, "[Network]\nModel=CC_SMALL_FP8\n").unwrap();
+        let issues = check_asi_profile(&dir, ModelSelection::Original).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].contains("CC_SMALL_FP8"));
+        assert!(
+            check_asi_profile(&dir, ModelSelection::Small)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            check_asi_profile(&dir, ModelSelection::Both)
+                .unwrap()
+                .is_empty()
+        );
+        fs::write(&path, "[Network]\nModel=CC_OTHER\n").unwrap();
+        let issues = check_asi_profile(&dir, ModelSelection::Both).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert!(issues[0].contains("CC_OTHER"));
+        fs::write(&path, "[Network]\nTimeout=1\n").unwrap();
+        assert!(
+            !check_asi_profile(&dir, ModelSelection::Original)
                 .unwrap()
                 .is_empty()
         );
