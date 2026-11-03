@@ -2,37 +2,37 @@
   "schema": 1,
   "installer": {
     "schema": 1,
-    "version": "0.2.7",
+    "version": "0.3.0",
     "platform": "windows-x64",
-    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.2.7/OptiScalerNR.exe",
-    "sha256": "2455e7b79837534ab663f11e905b62f7b7d1a47c8f23236bf704853787a3f667",
-    "notes": "OptiScaler NR Installer 0.2.7"
+    "exe_url": "https://github.com/DestinySail/optiscaler-nr-installer/releases/download/app-v0.3.0/OptiScalerNR.exe",
+    "sha256": "7f11fd7fb68da5a5a51387af3d89e155655cf1f6e7c62e425084d342f138f492",
+    "notes": "OptiScaler NR Installer 0.3.0"
   },
   "upstream": {
-    "release_id": 431265124,
-    "tag": "v1.13.4.3",
-    "published_at": "2026-11-02T09:23:06Z",
+    "release_id": 432473151,
+    "tag": "v1.14.0",
+    "published_at": "2026-11-03T09:09:00Z",
     "asset": {
-      "id": 701190099,
-      "name": "OptScaler-NR-1.13.4.3.zip",
-      "size": 223544259,
-      "sha256": "c828afa8592538d0872719b07538798d2f120ed79fe7bb59c17358f5ee6bbfc2",
-      "url": "https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/v1.13.4.3/OptScaler-NR-1.13.4.3.zip",
-      "updated_at": "2026-11-02T09:23:16Z"
+      "id": 704985169,
+      "name": "OptScaler-NR-1.14.0.zip",
+      "size": 248357303,
+      "sha256": "9b486fa45d82bd6db905de23eb04bf0c0eef7e6cd491809371c070bed80bd44c",
+      "url": "https://github.com/TheAutomatic/dlss-5-amd-project/releases/download/v1.14.0/OptScaler-NR-1.14.0.zip",
+      "updated_at": "2026-11-03T09:09:13Z"
     },
     "checked_at_ms": 0
   },
   "reframework": {
-    "release_id": 430298799,
-    "tag": "nightly-01436-1813bf34f720cfed51c0e8f40fc90ed1459a3c6b",
-    "published_at": "2026-11-01T01:37:33Z",
+    "release_id": 432417960,
+    "tag": "nightly-01437-f9cb2ac3924de8f95777b9418a4e42a1fc995722",
+    "published_at": "2026-11-03T08:08:59Z",
     "asset": {
-      "id": 697006448,
+      "id": 704826916,
       "name": "REFramework.zip",
-      "size": 13269112,
-      "sha256": "9ef584db4a37715f0a677a5d304a5048b850389875b5dae0e204d4abbe9366f5",
-      "url": "https://github.com/praydog/REFramework-nightly/releases/download/nightly-01436-1813bf34f720cfed51c0e8f40fc90ed1459a3c6b/REFramework.zip",
-      "updated_at": "2026-11-01T01:37:35Z"
+      "size": 13266497,
+      "sha256": "b3b05ff5ae6da59482a07c833c987d4d17ecfd2637ea2257b6c6e546c0366990",
+      "url": "https://github.com/praydog/REFramework-nightly/releases/download/nightly-01437-f9cb2ac3924de8f95777b9418a4e42a1fc995722/REFramework.zip",
+      "updated_at": "2026-11-03T08:09:01Z"
     },
     "checked_at_ms": 0
   }
