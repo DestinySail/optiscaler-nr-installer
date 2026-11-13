@@ -23,16 +23,16 @@
     "checked_at_ms": 0
   },
   "reframework": {
-    "release_id": 434431942,
-    "tag": "nightly-01438-f00d6bee503125180621a6666779499f9a30881d",
-    "published_at": "2026-11-04T20:42:54Z",
+    "release_id": 443607790,
+    "tag": "nightly-01439-c38d1fec156598263e1b6d6dcb510d236304e3d4",
+    "published_at": "2026-11-12T22:58:59Z",
     "asset": {
-      "id": 710871384,
+      "id": 741407322,
       "name": "REFramework.zip",
-      "size": 13272997,
-      "sha256": "9b3f82dbad5599d3b67082bc89ca5a6b990fcf02416ea32490a630cea2f2d9d0",
-      "url": "https://github.com/praydog/REFramework-nightly/releases/download/nightly-01438-f00d6bee503125180621a6666779499f9a30881d/REFramework.zip",
-      "updated_at": "2026-11-04T20:42:57Z"
+      "size": 13278326,
+      "sha256": "3d2819edbd7d43db0b07ea75e1450da4bff015474f258815c78a7ad9309a5fd7",
+      "url": "https://github.com/praydog/REFramework-nightly/releases/download/nightly-01439-c38d1fec156598263e1b6d6dcb510d236304e3d4/REFramework.zip",
+      "updated_at": "2026-11-12T22:59:01Z"
     },
     "checked_at_ms": 0
   }
